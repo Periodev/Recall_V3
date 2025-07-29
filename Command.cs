@@ -1,0 +1,296 @@
+// Command.cs - 原子命令系統
+// 最低限度C風格：readonly struct + switch分派 + 簡單Queue
+
+using System;
+using System.Collections.Generic;
+
+namespace CombatCore
+{
+    // ✅ readonly struct - 防錯且高效
+    public readonly struct AtomicCmd
+    {
+        public readonly CmdOp Op;
+        public readonly byte SrcId, TargetId;
+        public readonly ushort Value;      // ✅ 單一通用數值欄位
+        
+        public AtomicCmd(CmdOp op, byte srcId, byte targetId, ushort value = 0)
+        {
+            Op = op;
+            SrcId = srcId;
+            TargetId = targetId;
+            Value = value;
+        }
+        
+        // 常用命令建構輔助方法
+        public static AtomicCmd Attack(byte srcId, byte targetId, ushort damage) 
+            => new(CmdOp.ATTACK, srcId, targetId, damage);
+            
+        public static AtomicCmd Block(byte srcId, ushort amount) 
+            => new(CmdOp.BLOCK, srcId, srcId, amount);
+            
+        public static AtomicCmd Charge(byte srcId, byte amount) 
+            => new(CmdOp.CHARGE, srcId, srcId, amount);
+            
+        public static AtomicCmd Heal(byte srcId, byte targetId, ushort amount) 
+            => new(CmdOp.HEAL, srcId, targetId, amount);
+            
+        public static AtomicCmd AddStatus(byte srcId, byte targetId, StatusFlags status, byte duration)
+            => new(CmdOp.STATUS_ADD, srcId, targetId, (ushort)((byte)status << 8 | duration));
+            
+        public static AtomicCmd RemoveStatus(byte targetId, StatusFlags status)
+            => new(CmdOp.STATUS_REMOVE, 0, targetId, (ushort)status);
+            
+        public static AtomicCmd TurnEndCleanup()
+            => new(CmdOp.TURN_END_CLEANUP, 0, 0, 0);
+    }
+    
+    // 命令執行結果
+    public readonly struct CommandResult
+    {
+        public readonly bool Success;
+        public readonly ushort Value;       // 實際造成的傷害/治療量等
+        public readonly string Message;     // 除錯訊息
+        
+        public CommandResult(bool success, ushort value = 0, string message = "")
+        {
+            Success = success;
+            Value = value;
+            Message = message;
+        }
+        
+        public static readonly CommandResult SUCCESS = new(true);
+        public static readonly CommandResult FAILED = new(false);
+    }
+    
+    // 命令系統 - 核心執行引擎
+    public static class CommandSystem
+    {
+        // ✅ 簡單Queue - 避免複雜Ring Buffer
+        private static readonly Queue<AtomicCmd> s_commands = new();
+        private static readonly Queue<AtomicCmd> s_delayedCommands = new();  // 延遲執行的命令
+        
+        // 推入命令到佇列
+        public static void PushCmd(in AtomicCmd cmd) => s_commands.Enqueue(cmd);    // ✅ in參數
+        public static void PushDelayedCmd(in AtomicCmd cmd) => s_delayedCommands.Enqueue(cmd);
+        
+        // 批次推入命令
+        public static void PushCommands(ReadOnlySpan<AtomicCmd> commands)           // ✅ ReadOnlySpan
+        {
+            foreach (ref readonly var cmd in commands)
+            {
+                s_commands.Enqueue(cmd);
+            }
+        }
+        
+        // ✅ Switch表達式分派 - 編譯時優化
+        public static CommandResult ExecuteCmd(in AtomicCmd cmd) => cmd.Op switch   // ✅ switch + in
+        {
+            CmdOp.NOP => CommandResult.SUCCESS,
+            CmdOp.ATTACK => HandleAttack(in cmd),
+            CmdOp.BLOCK => HandleBlock(in cmd),
+            CmdOp.CHARGE => HandleCharge(in cmd),
+            CmdOp.HEAL => HandleHeal(in cmd),
+            CmdOp.STATUS_ADD => HandleStatusAdd(in cmd),
+            CmdOp.STATUS_REMOVE => HandleStatusRemove(in cmd),
+            CmdOp.DEFLECT => HandleDeflect(in cmd),
+            CmdOp.TURN_END_CLEANUP => HandleTurnEndCleanup(in cmd),
+            CmdOp.ACTOR_DEATH => HandleActorDeath(in cmd),
+            _ => new CommandResult(false, 0, $"未知命令: {cmd.Op}")
+        };
+        
+        // 執行佇列中的所有命令
+        public static int ExecuteAll()
+        {
+            int executedCount = 0;
+            
+            // 執行主命令佇列
+            while (s_commands.TryDequeue(out var cmd))
+            {
+                var result = ExecuteCmd(in cmd);
+                executedCount++;
+                
+                // 處理命令執行失敗的情況
+                if (!result.Success)
+                {
+                    Console.WriteLine($"命令執行失敗: {result.Message}");
+                }
+            }
+            
+            // 處理延遲命令
+            while (s_delayedCommands.TryDequeue(out var delayedCmd))
+            {
+                s_commands.Enqueue(delayedCmd);
+            }
+            
+            return executedCount;
+        }
+        
+        // 清空所有命令佇列
+        public static void Clear()
+        {
+            s_commands.Clear();
+            s_delayedCommands.Clear();
+        }
+        
+        // 取得佇列狀態
+        public static int GetQueueCount() => s_commands.Count;
+        public static int GetDelayedQueueCount() => s_delayedCommands.Count;
+        
+        // ==================== 命令處理函數 ====================
+        
+        private static CommandResult HandleAttack(in AtomicCmd cmd)
+        {
+            if (!ActorManager.IsAlive(cmd.SrcId) || !ActorManager.IsAlive(cmd.TargetId))
+                return new CommandResult(false, 0, "攻擊者或目標已死亡");
+                
+            if (!ActorManager.CanAct(cmd.SrcId))
+                return new CommandResult(false, 0, "攻擊者無法行動");
+            
+            ref var attacker = ref ActorManager.GetActor(cmd.SrcId);
+            ushort damage = cmd.Value;
+            
+            // 蓄力加成
+            if (attacker.Charge > 0)
+            {
+                damage = (ushort)(damage + attacker.Charge * CombatConstants.CHARGE_DAMAGE_BONUS);
+                attacker.Charge = 0;  // 消耗蓄力
+            }
+            
+            // 執行傷害
+            ushort actualDamage = ActorOperations.DealDamage(cmd.TargetId, damage);
+            
+            // 檢查目標是否死亡
+            if (!ActorManager.IsAlive(cmd.TargetId))
+            {
+                PushDelayedCmd(new AtomicCmd(CmdOp.ACTOR_DEATH, 0, cmd.TargetId, 0));
+            }
+            
+            return new CommandResult(true, actualDamage, $"造成 {actualDamage} 點傷害");
+        }
+        
+        private static CommandResult HandleBlock(in AtomicCmd cmd)
+        {
+            if (!ActorManager.IsAlive(cmd.SrcId))
+                return new CommandResult(false, 0, "格擋者已死亡");
+                
+            if (!ActorManager.CanAct(cmd.SrcId))
+                return new CommandResult(false, 0, "格擋者無法行動");
+            
+            ActorOperations.AddBlock(cmd.SrcId, cmd.Value);
+            return new CommandResult(true, cmd.Value, $"獲得 {cmd.Value} 點護甲");
+        }
+        
+        private static CommandResult HandleCharge(in AtomicCmd cmd)
+        {
+            if (!ActorManager.IsAlive(cmd.SrcId))
+                return new CommandResult(false, 0, "蓄力者已死亡");
+                
+            if (!ActorManager.CanAct(cmd.SrcId))
+                return new CommandResult(false, 0, "蓄力者無法行動");
+            
+            byte chargeAmount = (byte)Math.Min(cmd.Value, CombatConstants.MAX_CHARGE);
+            ActorOperations.AddCharge(cmd.SrcId, chargeAmount);
+            return new CommandResult(true, chargeAmount, $"獲得 {chargeAmount} 點蓄力");
+        }
+        
+        private static CommandResult HandleHeal(in AtomicCmd cmd)
+        {
+            if (!ActorManager.IsAlive(cmd.TargetId))
+                return new CommandResult(false, 0, "治療目標已死亡");
+            
+            ushort healAmount = ActorOperations.Heal(cmd.TargetId, cmd.Value);
+            return new CommandResult(true, healAmount, $"治療 {healAmount} 點生命值");
+        }
+        
+        private static CommandResult HandleStatusAdd(in AtomicCmd cmd)
+        {
+            if (!ActorManager.IsAlive(cmd.TargetId))
+                return new CommandResult(false, 0, "狀態目標已死亡");
+            
+            // 從Value解包狀態和持續時間
+            StatusFlags status = (StatusFlags)(cmd.Value >> 8);
+            byte duration = (byte)(cmd.Value & 0xFF);
+            
+            ActorOperations.AddStatus(cmd.TargetId, status, duration);
+            return new CommandResult(true, duration, $"添加狀態 {status}，持續 {duration} 回合");
+        }
+        
+        private static CommandResult HandleStatusRemove(in AtomicCmd cmd)
+        {
+            if (!ActorManager.IsAlive(cmd.TargetId))
+                return new CommandResult(false, 0, "狀態目標已死亡");
+            
+            StatusFlags status = (StatusFlags)cmd.Value;
+            bool removed = ActorOperations.RemoveStatus(cmd.TargetId, status);
+            return new CommandResult(removed, 0, removed ? $"移除狀態 {status}" : $"目標沒有狀態 {status}");
+        }
+        
+        private static CommandResult HandleDeflect(in AtomicCmd cmd)
+        {
+            // 反彈傷害 - 將傷害返回給攻擊者
+            if (!ActorManager.IsAlive(cmd.SrcId) || !ActorManager.IsAlive(cmd.TargetId))
+                return new CommandResult(false, 0, "反彈參與者已死亡");
+            
+            ushort deflectedDamage = ActorOperations.DealDamage(cmd.SrcId, cmd.Value);
+            
+            if (!ActorManager.IsAlive(cmd.SrcId))
+            {
+                PushDelayedCmd(new AtomicCmd(CmdOp.ACTOR_DEATH, 0, cmd.SrcId, 0));
+            }
+            
+            return new CommandResult(true, deflectedDamage, $"反彈 {deflectedDamage} 點傷害");
+        }
+        
+        private static CommandResult HandleTurnEndCleanup(in AtomicCmd cmd)
+        {
+            ActorManager.EndTurnCleanup();
+            return new CommandResult(true, 0, "回合結束清理完成");
+        }
+        
+        private static CommandResult HandleActorDeath(in AtomicCmd cmd)
+        {
+            if (ActorManager.IsAlive(cmd.TargetId))
+            {
+                ActorManager.RemoveActor(cmd.TargetId);
+                return new CommandResult(true, 0, $"Actor {cmd.TargetId} 死亡");
+            }
+            return new CommandResult(false, 0, "目標已經死亡");
+        }
+    }
+    
+    // 常用命令建構輔助類
+    public static class CommandBuilder
+    {
+        // 基礎操作命令
+        public static AtomicCmd MakeAttackCmd(byte srcId, byte targetId, ushort baseDamage = 10)
+            => AtomicCmd.Attack(srcId, targetId, baseDamage);
+            
+        public static AtomicCmd MakeBlockCmd(byte srcId, ushort blockAmount = 5)
+            => AtomicCmd.Block(srcId, blockAmount);
+            
+        public static AtomicCmd MakeChargeCmd(byte srcId, byte chargeAmount = 1)
+            => AtomicCmd.Charge(srcId, chargeAmount);
+            
+        // 組合操作命令
+        public static void BuildHeavyStrike(byte srcId, byte targetId, Span<AtomicCmd> buffer, out int count)
+        {
+            buffer[0] = MakeChargeCmd(srcId, 2);                    // 先蓄力
+            buffer[1] = MakeAttackCmd(srcId, targetId, 15);         // 再重擊
+            count = 2;
+        }
+        
+        public static void BuildShieldBash(byte srcId, byte targetId, Span<AtomicCmd> buffer, out int count)
+        {
+            buffer[0] = MakeBlockCmd(srcId, 3);                     // 先格擋
+            buffer[1] = MakeAttackCmd(srcId, targetId, 8);          // 再攻擊
+            count = 2;
+        }
+        
+        public static void BuildComboAttack(byte srcId, byte targetId, Span<AtomicCmd> buffer, out int count)
+        {
+            buffer[0] = MakeAttackCmd(srcId, targetId, 7);          // 第一擊
+            buffer[1] = MakeAttackCmd(srcId, targetId, 7);          // 第二擊
+            count = 2;
+        }
+    }
+}

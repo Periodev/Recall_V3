@@ -1,5 +1,6 @@
 // Command.cs - 原子命令系統
 // 最低限度C風格：readonly struct + switch分派 + 簡單Queue
+// 已整合Reaction系統事件觸發
 
 using System;
 using System.Collections.Generic;
@@ -83,20 +84,31 @@ namespace CombatCore
         }
         
         // ✅ Switch表達式分派 - 編譯時優化
-        public static CommandResult ExecuteCmd(in AtomicCmd cmd) => cmd.Op switch   // ✅ switch + in
+        public static CommandResult ExecuteCmd(in AtomicCmd cmd) 
         {
-            CmdOp.NOP => CommandResult.SUCCESS,
-            CmdOp.ATTACK => HandleAttack(in cmd),
-            CmdOp.BLOCK => HandleBlock(in cmd),
-            CmdOp.CHARGE => HandleCharge(in cmd),
-            CmdOp.HEAL => HandleHeal(in cmd),
-            CmdOp.STATUS_ADD => HandleStatusAdd(in cmd),
-            CmdOp.STATUS_REMOVE => HandleStatusRemove(in cmd),
-            CmdOp.DEFLECT => HandleDeflect(in cmd),
-            CmdOp.TURN_END_CLEANUP => HandleTurnEndCleanup(in cmd),
-            CmdOp.ACTOR_DEATH => HandleActorDeath(in cmd),
-            _ => new CommandResult(false, 0, $"未知命令: {cmd.Op}")
-        };
+            // ✅ 觸發命令執行前事件
+            ReactionEventDispatcher.OnBeforeCommand(in cmd);
+            
+            var result = cmd.Op switch   // ✅ switch + in
+            {
+                CmdOp.NOP => CommandResult.SUCCESS,
+                CmdOp.ATTACK => HandleAttack(in cmd),
+                CmdOp.BLOCK => HandleBlock(in cmd),
+                CmdOp.CHARGE => HandleCharge(in cmd),
+                CmdOp.HEAL => HandleHeal(in cmd),
+                CmdOp.STATUS_ADD => HandleStatusAdd(in cmd),
+                CmdOp.STATUS_REMOVE => HandleStatusRemove(in cmd),
+                CmdOp.DEFLECT => HandleDeflect(in cmd),
+                CmdOp.TURN_END_CLEANUP => HandleTurnEndCleanup(in cmd),
+                CmdOp.ACTOR_DEATH => HandleActorDeath(in cmd),
+                _ => new CommandResult(false, 0, $"未知命令: {cmd.Op}")
+            };
+            
+            // ✅ 觸發命令執行後事件
+            ReactionEventDispatcher.OnAfterCommand(in cmd, in result);
+            
+            return result;
+        }
         
         // 執行佇列中的所有命令
         public static int ExecuteAll()
@@ -159,6 +171,9 @@ namespace CombatCore
             // 執行傷害
             ushort actualDamage = ActorOperations.DealDamage(cmd.TargetId, damage);
             
+            // ✅ 觸發受傷事件
+            ReactionEventDispatcher.OnActorDamaged(cmd.TargetId, cmd.SrcId, actualDamage);
+            
             // 檢查目標是否死亡
             if (!ActorManager.IsAlive(cmd.TargetId))
             {
@@ -177,6 +192,10 @@ namespace CombatCore
                 return new CommandResult(false, 0, "格擋者無法行動");
             
             ActorOperations.AddBlock(cmd.SrcId, cmd.Value);
+            
+            // ✅ 觸發護甲獲得事件
+            ReactionEventDispatcher.OnBlockGained(cmd.SrcId, cmd.Value);
+            
             return new CommandResult(true, cmd.Value, $"獲得 {cmd.Value} 點護甲");
         }
         
@@ -190,6 +209,10 @@ namespace CombatCore
             
             byte chargeAmount = (byte)Math.Min(cmd.Value, CombatConstants.MAX_CHARGE);
             ActorOperations.AddCharge(cmd.SrcId, chargeAmount);
+            
+            // ✅ 觸發蓄力獲得事件
+            ReactionEventDispatcher.OnChargeGained(cmd.SrcId, chargeAmount);
+            
             return new CommandResult(true, chargeAmount, $"獲得 {chargeAmount} 點蓄力");
         }
         
@@ -199,6 +222,10 @@ namespace CombatCore
                 return new CommandResult(false, 0, "治療目標已死亡");
             
             ushort healAmount = ActorOperations.Heal(cmd.TargetId, cmd.Value);
+            
+            // ✅ 觸發治療事件
+            ReactionEventDispatcher.OnActorHealed(cmd.TargetId, cmd.SrcId, healAmount);
+            
             return new CommandResult(true, healAmount, $"治療 {healAmount} 點生命值");
         }
         
@@ -251,6 +278,9 @@ namespace CombatCore
         {
             if (ActorManager.IsAlive(cmd.TargetId))
             {
+                // ✅ 觸發死亡事件
+                ReactionEventDispatcher.OnActorDeath(cmd.TargetId);
+                
                 ActorManager.RemoveActor(cmd.TargetId);
                 return new CommandResult(true, 0, $"Actor {cmd.TargetId} 死亡");
             }

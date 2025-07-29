@@ -5,133 +5,146 @@ using System;
 
 namespace CombatCore
 {
-    // HLA翻譯引擎 - 戰術意圖轉換為命令序列
+    // HLA翻譯引擎 - 戰術意圖轉換為立即效果和延後效果
     public static class HLATranslator
     {
-        // ✅ Switch表達式分派 - HLA翻譯核心
-        public static HLATranslationResult TranslateHLA(
-            HLA hla, byte srcId, byte targetId, Span<AtomicCmd> buffer)  // ✅ Span<T>參數
+        // ✅ 新的翻譯機制：分離立即和延後效果
+        public static void TranslateAndRegisterHLA(HLA hla, byte srcId, byte targetId)
         {
-            return hla switch
+            // 1. 處理立即效果（BLOCK/CHARGE等）
+            ProcessImmediateEffects(hla, srcId);
+            
+            // 2. 註冊延後效果（ATTACK等）
+            RegisterDelayedEffects(hla, srcId, targetId);
+        }
+        
+        // 處理立即效果（Intent Phase執行）
+        private static void ProcessImmediateEffects(HLA hla, byte srcId)
+        {
+            switch (hla)
             {
-                // 基礎動作 (1:1翻譯)
-                HLA.BASIC_ATTACK => TranslateBasicAttack(srcId, targetId, buffer),
-                HLA.BASIC_BLOCK => TranslateBasicBlock(srcId, buffer),
-                HLA.BASIC_CHARGE => TranslateBasicCharge(srcId, buffer),
-                
-                // 組合動作 (1:N翻譯)
-                HLA.HEAVY_STRIKE => TranslateHeavyStrike(srcId, targetId, buffer),
-                HLA.SHIELD_BASH => TranslateShieldBash(srcId, targetId, buffer),
-                HLA.COMBO_ATTACK => TranslateComboAttack(srcId, targetId, buffer),
-                HLA.CHARGED_BLOCK => TranslateChargedBlock(srcId, buffer),
-                HLA.POWER_CHARGE => TranslatePowerCharge(srcId, buffer),
-                
-                // 敵人動作 (複雜組合)
-                HLA.ENEMY_AGGRESSIVE => TranslateEnemyAggressive(srcId, targetId, buffer),
-                HLA.ENEMY_DEFENSIVE => TranslateEnemyDefensive(srcId, buffer),
-                HLA.ENEMY_BERSERKER => TranslateEnemyBerserker(srcId, targetId, buffer),
-                HLA.ENEMY_TURTLE => TranslateEnemyTurtle(srcId, buffer),
-                
-                _ => HLATranslationResult.FAILED
-            };
+                case HLA.BASIC_BLOCK:
+                    CommandSystem.PushCmd(CommandBuilder.MakeBlockCmd(srcId, 5));
+                    break;
+                    
+                case HLA.BASIC_CHARGE:
+                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 1));
+                    break;
+                    
+                case HLA.HEAVY_STRIKE:
+                    // 立即蓄力，攻擊延後
+                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 2));
+                    break;
+                    
+                case HLA.SHIELD_BASH:
+                    // 立即護甲，攻擊延後
+                    CommandSystem.PushCmd(CommandBuilder.MakeBlockCmd(srcId, 3));
+                    break;
+                    
+                case HLA.CHARGED_BLOCK:
+                    // 立即蓄力和護甲
+                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 1));
+                    CommandSystem.PushCmd(CommandBuilder.MakeBlockCmd(srcId, 8));
+                    break;
+                    
+                case HLA.POWER_CHARGE:
+                    // 立即強力蓄力
+                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 2));
+                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 1));
+                    break;
+                    
+                case HLA.ENEMY_AGGRESSIVE:
+                    // 立即蓄力，攻擊延後
+                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 1));
+                    break;
+                    
+                case HLA.ENEMY_DEFENSIVE:
+                    // 立即護甲和蓄力
+                    CommandSystem.PushCmd(CommandBuilder.MakeBlockCmd(srcId, 10));
+                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 2));
+                    break;
+                    
+                case HLA.ENEMY_TURTLE:
+                    // 立即雙重護甲
+                    CommandSystem.PushCmd(CommandBuilder.MakeBlockCmd(srcId, 8));
+                    CommandSystem.PushCmd(CommandBuilder.MakeBlockCmd(srcId, 6));
+                    break;
+                    
+                // 純攻擊型HLA無立即效果
+                case HLA.BASIC_ATTACK:
+                case HLA.COMBO_ATTACK:
+                case HLA.ENEMY_BERSERKER:
+                    // 這些HLA沒有立即效果，只有延後攻擊
+                    break;
+            }
         }
         
-        // ==================== 基礎動作翻譯 ====================
-        
-        private static HLATranslationResult TranslateBasicAttack(byte srcId, byte targetId, Span<AtomicCmd> buffer)
+        // 註冊延後效果（Enemy Phase觸發）
+        private static void RegisterDelayedEffects(HLA hla, byte srcId, byte targetId)
         {
-            buffer[0] = CommandBuilder.MakeAttackCmd(srcId, targetId, 10);
-            return new HLATranslationResult(true, 1);
+            // 檢查HLA是否有攻擊效果
+            if (!HasAttackEffect(hla)) return;
+            
+            // 創建延後攻擊的Reaction規則
+            var condition = new ReactionCondition(
+                ReactionTrigger.ENEMY_PHASE_START,
+                sourceFilter: srcId
+            );
+            
+            // 將HLA和目標打包到Value中
+            ushort packedValue = (ushort)((byte)hla << 8 | targetId);
+            
+            var effect = new ReactionEffect(
+                ReactionEffectType.EXECUTE_HLA,
+                255, // 255表示使用事件目標
+                packedValue
+            );
+            
+            var rule = new ReactionRule(
+                GetUniqueRuleId(),
+                condition,
+                effect,
+                $"延後攻擊-{hla}",
+                true // 一次性規則
+            );
+            
+            ReactionSystem.RegisterRule(rule);
         }
         
-        private static HLATranslationResult TranslateBasicBlock(byte srcId, Span<AtomicCmd> buffer)
+        // 檢查HLA是否包含攻擊效果
+        private static bool HasAttackEffect(HLA hla) => hla switch
         {
-            buffer[0] = CommandBuilder.MakeBlockCmd(srcId, 5);
-            return new HLATranslationResult(true, 1);
-        }
+            HLA.BASIC_ATTACK => true,
+            HLA.HEAVY_STRIKE => true,
+            HLA.SHIELD_BASH => true,
+            HLA.COMBO_ATTACK => true,
+            HLA.ENEMY_AGGRESSIVE => true,
+            HLA.ENEMY_BERSERKER => true,
+            _ => false
+        };
         
-        private static HLATranslationResult TranslateBasicCharge(byte srcId, Span<AtomicCmd> buffer)
+        // 生成唯一的規則ID
+        private static byte s_nextRuleId = 100; // 從100開始避免與CommonReactions衝突
+        private static byte GetUniqueRuleId() => s_nextRuleId++;
+        
+        // 重置規則ID計數器
+        public static void ResetRuleIdCounter() => s_nextRuleId = 100;
+    }
+    
+    // 敵人意圖資訊 - 供UI顯示
+    public readonly struct EnemyIntent
+    {
+        public readonly byte EnemyId;
+        public readonly HLA Action;
+        public readonly string Description;
+        public readonly ushort EstimatedValue;
+        
+        public EnemyIntent(byte enemyId, HLA action, string description, ushort estimatedValue)
         {
-            buffer[0] = CommandBuilder.MakeChargeCmd(srcId, 1);
-            return new HLATranslationResult(true, 1);
-        }
-        
-        // ==================== 組合動作翻譯 ====================
-        
-        // 重擊：蓄力 + 強力攻擊
-        private static HLATranslationResult TranslateHeavyStrike(byte srcId, byte targetId, Span<AtomicCmd> buffer)
-        {
-            buffer[0] = CommandBuilder.MakeChargeCmd(srcId, 2);      // 蓄力2點
-            buffer[1] = CommandBuilder.MakeAttackCmd(srcId, targetId, 15);  // 基礎攻擊(會被蓄力加成)
-            return new HLATranslationResult(true, 2);
-        }
-        
-        // 盾擊：格擋 + 攻擊
-        private static HLATranslationResult TranslateShieldBash(byte srcId, byte targetId, Span<AtomicCmd> buffer)
-        {
-            buffer[0] = CommandBuilder.MakeBlockCmd(srcId, 3);       // 先獲得護甲
-            buffer[1] = CommandBuilder.MakeAttackCmd(srcId, targetId, 8);   // 較弱的攻擊
-            return new HLATranslationResult(true, 2);
-        }
-        
-        // 連擊：兩次攻擊
-        private static HLATranslationResult TranslateComboAttack(byte srcId, byte targetId, Span<AtomicCmd> buffer)
-        {
-            buffer[0] = CommandBuilder.MakeAttackCmd(srcId, targetId, 7);   // 第一擊
-            buffer[1] = CommandBuilder.MakeAttackCmd(srcId, targetId, 7);   // 第二擊
-            return new HLATranslationResult(true, 2);
-        }
-        
-        // 充能護盾：蓄力 + 格擋
-        private static HLATranslationResult TranslateChargedBlock(byte srcId, Span<AtomicCmd> buffer)
-        {
-            buffer[0] = CommandBuilder.MakeChargeCmd(srcId, 1);      // 蓄力為下回合準備
-            buffer[1] = CommandBuilder.MakeBlockCmd(srcId, 8);       // 強力護盾
-            return new HLATranslationResult(true, 2);
-        }
-        
-        // 強力蓄力：雙重蓄力
-        private static HLATranslationResult TranslatePowerCharge(byte srcId, Span<AtomicCmd> buffer)
-        {
-            buffer[0] = CommandBuilder.MakeChargeCmd(srcId, 2);      // 一次蓄力2點
-            buffer[1] = CommandBuilder.MakeChargeCmd(srcId, 1);      // 再蓄力1點，總共3點
-            return new HLATranslationResult(true, 2);
-        }
-        
-        // ==================== 敵人動作翻譯 ====================
-        
-        // 敵人激進：蓄力 + 雙重攻擊
-        private static HLATranslationResult TranslateEnemyAggressive(byte srcId, byte targetId, Span<AtomicCmd> buffer)
-        {
-            buffer[0] = CommandBuilder.MakeChargeCmd(srcId, 1);      // 蓄力
-            buffer[1] = CommandBuilder.MakeAttackCmd(srcId, targetId, 12);  // 強力攻擊
-            buffer[2] = CommandBuilder.MakeAttackCmd(srcId, targetId, 8);   // 追加攻擊
-            return new HLATranslationResult(true, 3);
-        }
-        
-        // 敵人防禦：格擋 + 蓄力
-        private static HLATranslationResult TranslateEnemyDefensive(byte srcId, Span<AtomicCmd> buffer)
-        {
-            buffer[0] = CommandBuilder.MakeBlockCmd(srcId, 10);      // 強力護盾
-            buffer[1] = CommandBuilder.MakeChargeCmd(srcId, 2);      // 為下回合蓄力
-            return new HLATranslationResult(true, 2);
-        }
-        
-        // 敵人狂暴：三連擊
-        private static HLATranslationResult TranslateEnemyBerserker(byte srcId, byte targetId, Span<AtomicCmd> buffer)
-        {
-            buffer[0] = CommandBuilder.MakeAttackCmd(srcId, targetId, 6);   // 第一擊
-            buffer[1] = CommandBuilder.MakeAttackCmd(srcId, targetId, 6);   // 第二擊  
-            buffer[2] = CommandBuilder.MakeAttackCmd(srcId, targetId, 6);   // 第三擊
-            return new HLATranslationResult(true, 3);
-        }
-        
-        // 敵人龜縮：雙重格擋
-        private static HLATranslationResult TranslateEnemyTurtle(byte srcId, Span<AtomicCmd> buffer)
-        {
-            buffer[0] = CommandBuilder.MakeBlockCmd(srcId, 8);       // 第一層護盾
-            buffer[1] = CommandBuilder.MakeBlockCmd(srcId, 6);       // 第二層護盾
-            return new HLATranslationResult(true, 2);
+            EnemyId = enemyId;
+            Action = action;
+            Description = description;
+            EstimatedValue = estimatedValue;
         }
     }
     
@@ -150,23 +163,19 @@ namespace CombatCore
         public static void SetEnemyHLA(byte enemyId, HLA hla) => s_enemyHLAs[enemyId] = hla;
         public static HLA GetEnemyHLA(byte enemyId) => s_enemyHLAs.GetValueOrDefault(enemyId, HLA.BASIC_ATTACK);
         
-        // 處理HLA - 翻譯並推入命令佇列
+        // 處理HLA - 新的Reaction驅動機制
         public static bool ProcessHLA(byte actorId, byte targetId, HLA hla)
         {
             if (!ActorManager.IsAlive(actorId)) return false;
             
-            // ✅ stackalloc工作記憶體
-            Span<AtomicCmd> buffer = stackalloc AtomicCmd[CombatConstants.MAX_HLA_TRANSLATION];
+            // ✅ 使用新的翻譯機制：立即效果 + 延後效果註冊
+            HLATranslator.TranslateAndRegisterHLA(hla, actorId, targetId);
             
-            var result = HLATranslator.TranslateHLA(hla, actorId, targetId, buffer);
+            // 觸發意圖宣告事件（處理立即效果）
+            ReactionEventDispatcher.OnIntentDeclared(actorId, hla, targetId);
             
-            if (!result.Success) return false;
-            
-            // 推入翻譯出的命令序列
-            for (int i = 0; i < result.CommandCount; i++)
-            {
-                CommandSystem.PushCmd(buffer[i]);
-            }
+            // 執行立即效果
+            CommandSystem.ExecuteAll();
             
             return true;
         }
@@ -177,14 +186,14 @@ namespace CombatCore
             return ProcessHLA(playerId, targetId, s_playerHLA);
         }
         
-        // 處理敵人HLA
+        // 處理敵人HLA - 保留以維持兼容性，但實際上Enemy Phase不再手動調用
         public static bool ProcessEnemyHLA(byte enemyId, byte targetId)
         {
             var enemyHLA = GetEnemyHLA(enemyId);
             return ProcessHLA(enemyId, targetId, enemyHLA);
         }
         
-        // 批次處理多個敵人HLA
+        // 批次處理多個敵人HLA - 保留以維持兼容性
         public static int ProcessAllEnemyHLAs(ReadOnlySpan<byte> enemyIds, byte playerTargetId)
         {
             int processedCount = 0;
@@ -203,6 +212,52 @@ namespace CombatCore
         {
             s_playerHLA = HLA.BASIC_ATTACK;
             s_enemyHLAs.Clear();
+            HLATranslator.ResetRuleIdCounter(); // ✅ 重置新的規則ID計數器
+        }
+        
+        // 獲取敵人意圖資訊 - 供UI顯示用
+        public static EnemyIntent GetEnemyIntent(byte enemyId)
+        {
+            if (!ActorManager.IsAlive(enemyId)) 
+                return new EnemyIntent(enemyId, HLA.BASIC_ATTACK, "死亡", 0);
+                
+            var hla = GetEnemyHLA(enemyId);
+            var (description, estimatedValue) = GetHLAIntentInfo(hla, enemyId);
+            
+            return new EnemyIntent(enemyId, hla, description, estimatedValue);
+        }
+        
+        // 獲取所有敵人意圖
+        public static void GetAllEnemyIntents(Span<EnemyIntent> buffer, out int count)
+        {
+            count = 0;
+            foreach (var kvp in s_enemyHLAs)
+            {
+                if (count >= buffer.Length) break;
+                if (!ActorManager.IsAlive(kvp.Key)) continue;
+                
+                buffer[count] = GetEnemyIntent(kvp.Key);
+                count++;
+            }
+        }
+        
+        // 根據HLA推測意圖資訊
+        private static (string description, ushort estimatedValue) GetHLAIntentInfo(HLA hla, byte enemyId)
+        {
+            return hla switch
+            {
+                HLA.BASIC_ATTACK => ("攻擊", 10),
+                HLA.BASIC_BLOCK => ("格擋", 5),
+                HLA.BASIC_CHARGE => ("蓄力", 1),
+                HLA.HEAVY_STRIKE => ("重擊", 25), // 15基礎 + 2蓄力*5加成
+                HLA.SHIELD_BASH => ("盾擊", 8),
+                HLA.COMBO_ATTACK => ("連擊", 14), // 7+7
+                HLA.ENEMY_AGGRESSIVE => ("激進攻擊", 32), // 12 + 8，考慮蓄力
+                HLA.ENEMY_DEFENSIVE => ("防禦姿態", 10),
+                HLA.ENEMY_BERSERKER => ("狂暴", 18), // 6+6+6
+                HLA.ENEMY_TURTLE => ("龜縮", 14), // 8+6護甲
+                _ => ("未知", 0)
+            };
         }
         
         // 除錯資訊
@@ -212,6 +267,19 @@ namespace CombatCore
             foreach (var kvp in s_enemyHLAs)
             {
                 Console.WriteLine($"敵人 {kvp.Key}: {kvp.Value}");
+            }
+        }
+        
+        public static void DebugPrintEnemyIntents()
+        {
+            Console.WriteLine("=== 敵人意圖 ===");
+            Span<EnemyIntent> intents = stackalloc EnemyIntent[16];
+            GetAllEnemyIntents(intents, out int count);
+            
+            for (int i = 0; i < count; i++)
+            {
+                ref readonly var intent = ref intents[i];
+                Console.WriteLine($"敵人 {intent.EnemyId}: {intent.Description} ({intent.EstimatedValue})");
             }
         }
     }
@@ -304,8 +372,8 @@ namespace CombatCore
             };
         }
         
-        // 批次為所有敵人決策HLA
-        public static void DecideForAllEnemies()
+        // 批次為所有敵人決策HLA並處理意圖
+        public static void DecideAndDeclareForAllEnemies()
         {
             // ✅ stackalloc工作記憶體
             Span<byte> enemyBuffer = stackalloc byte[CombatConstants.MAX_ACTORS];
@@ -313,11 +381,21 @@ namespace CombatCore
             enemyCount += ActorManager.GetActorsByType(ActorType.ENEMY_ELITE, enemyBuffer[enemyCount..]);
             enemyCount += ActorManager.GetActorsByType(ActorType.ENEMY_BOSS, enemyBuffer[enemyCount..]);
             
+            // 獲取玩家作為攻擊目標
+            Span<byte> playerBuffer = stackalloc byte[16];
+            int playerCount = ActorManager.GetActorsByType(ActorType.PLAYER, playerBuffer);
+            byte playerTargetId = playerCount > 0 ? playerBuffer[0] : (byte)0;
+            
             for (int i = 0; i < enemyCount; i++)
             {
                 byte enemyId = enemyBuffer[i];
                 HLA decidedHLA = DecideForEnemy(enemyId);
+                
+                // 設定意圖（用於UI顯示）
                 HLASystem.SetEnemyHLA(enemyId, decidedHLA);
+                
+                // 處理意圖宣告（立即效果 + 註冊延後效果）
+                HLASystem.ProcessHLA(enemyId, playerTargetId, decidedHLA);
             }
         }
     }

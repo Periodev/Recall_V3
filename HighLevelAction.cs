@@ -273,12 +273,12 @@ namespace CombatCore
         public static void DebugPrintEnemyIntents()
         {
             Console.WriteLine("=== 敵人意圖 ===");
-            Span<EnemyIntent> intents = stackalloc EnemyIntent[16];
+            var intents = new EnemyIntent[16];
             GetAllEnemyIntents(intents, out int count);
             
             for (int i = 0; i < count; i++)
             {
-                ref readonly var intent = ref intents[i];
+                var intent = intents[i];
                 Console.WriteLine($"敵人 {intent.EnemyId}: {intent.Description} ({intent.EstimatedValue})");
             }
         }

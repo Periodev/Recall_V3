@@ -30,7 +30,7 @@ namespace CombatCore
         STATUS_ADDED = 30,      // 狀態被添加
         STATUS_REMOVED = 31,    // 狀態被移除
         
-        // 意圖相關觸發 ✅ 新增
+        // 意圖相關觸發
         INTENT_DECLARED = 40,   // 意圖宣告時（立即效果）
         ENEMY_PHASE_START = 41, // 敵人階段開始（延後效果）
     }
@@ -118,12 +118,12 @@ namespace CombatCore
         REFLECT_DAMAGE = 40,    // 反射傷害
         ABSORB_DAMAGE = 41,     // 吸收傷害
         
-        // HLA執行效果 ✅ 新增
+        // HLA執行效果
         EXECUTE_ATTACK = 50,    // 執行攻擊
         EXECUTE_HLA = 51,       // 執行完整HLA
     }
     
-    // 反應效果 - 觸發後執行的效果
+    // 反應效果
     public readonly struct ReactionEffect
     {
         public readonly ReactionEffectType Type;
@@ -143,7 +143,7 @@ namespace CombatCore
         }
     }
     
-    // 反應規則 - 完整的條件->效果映射
+    // 反應規則
     public readonly struct ReactionRule
     {
         public readonly byte Id;
@@ -163,10 +163,10 @@ namespace CombatCore
         }
     }
     
-    // 反應系統管理器
+    // 反應系統核心
     public static class ReactionSystem
     {
-        // ✅ 簡單靜態存儲
+        // 全域狀態
         private static readonly List<ReactionRule> s_activeRules = new();
         private static readonly HashSet<byte> s_triggeredOneTimeRules = new();
         private static readonly Queue<ReactionEvent> s_eventQueue = new();
@@ -177,10 +177,10 @@ namespace CombatCore
             s_activeRules.Add(rule);
         }
         
-        // 移除反應規則
+        // 取消註冊反應規則
         public static bool UnregisterRule(byte ruleId)
         {
-            for (int i = s_activeRules.Count - 1; i >= 0; i--)
+            for (int i = 0; i < s_activeRules.Count; i++)
             {
                 if (s_activeRules[i].Id == ruleId)
                 {
@@ -192,150 +192,104 @@ namespace CombatCore
             return false;
         }
         
-        // 觸發事件 - 核心事件處理函數
+        // 觸發事件
         public static void TriggerEvent(in ReactionEvent eventData)
         {
-            // 檢查所有活躍規則
-            foreach (ref readonly var rule in s_activeRules.AsSpan())
+            s_eventQueue.Enqueue(eventData);
+            
+            // 立即處理事件
+            ProcessEventQueue();
+        }
+        
+        // 處理事件佇列
+        private static void ProcessEventQueue()
+        {
+            while (s_eventQueue.Count > 0)
             {
-                // 檢查一次性規則是否已觸發
-                if (rule.OneTime && s_triggeredOneTimeRules.Contains(rule.Id))
-                    continue;
+                var eventData = s_eventQueue.Dequeue();
                 
-                // 檢查條件是否匹配
-                if (rule.Condition.Matches(in eventData))
+                // 檢查所有規則
+                for (int i = 0; i < s_activeRules.Count; i++)
                 {
-                    // 執行效果
-                    ExecuteEffect(in rule.Effect, in eventData);
+                    var rule = s_activeRules[i];
                     
-                    // 標記一次性規則
-                    if (rule.OneTime)
+                    // 跳過已觸發的一次性規則
+                    if (rule.OneTime && s_triggeredOneTimeRules.Contains(rule.Id))
+                        continue;
+                    
+                    // 檢查條件匹配
+                    if (rule.Condition.Matches(eventData))
                     {
-                        s_triggeredOneTimeRules.Add(rule.Id);
+                        // 執行效果
+                        ExecuteEffect(rule.Effect, eventData);
+                        
+                        // 標記一次性規則為已觸發
+                        if (rule.OneTime)
+                            s_triggeredOneTimeRules.Add(rule.Id);
                     }
                 }
             }
         }
         
-        // 執行反應效果
+        // 執行效果
         private static void ExecuteEffect(in ReactionEffect effect, in ReactionEvent eventData)
         {
-            // 確定實際目標ID
-            byte actualTargetId = effect.TargetId switch
-            {
-                0 => eventData.SourceId,        // 0 = 事件源
-                255 => eventData.TargetId,      // 255 = 事件目標
-                _ => effect.TargetId            // 其他 = 指定ID
-            };
+            byte targetId = effect.TargetId == 0 ? eventData.SourceId : 
+                           effect.TargetId == 255 ? eventData.TargetId : effect.TargetId;
             
-            // ✅ Switch表達式分派
             switch (effect.Type)
             {
                 case ReactionEffectType.DEAL_DAMAGE:
-                    ActorOperations.DealDamage(actualTargetId, effect.Value);
+                    ActorOperations.DealDamage(targetId, effect.Value);
                     break;
                     
                 case ReactionEffectType.HEAL:
-                    ActorOperations.Heal(actualTargetId, effect.Value);
+                    ActorOperations.Heal(targetId, effect.Value);
                     break;
                     
                 case ReactionEffectType.ADD_BLOCK:
-                    ActorOperations.AddBlock(actualTargetId, effect.Value);
+                    ActorOperations.AddBlock(targetId, effect.Value);
                     break;
                     
                 case ReactionEffectType.ADD_CHARGE:
-                    ActorOperations.AddCharge(actualTargetId, (byte)effect.Value);
+                    ActorOperations.AddCharge(targetId, (byte)effect.Value);
                     break;
                     
                 case ReactionEffectType.ADD_STATUS:
-                    ActorOperations.AddStatus(actualTargetId, effect.Status, (byte)effect.Value);
+                    ActorOperations.AddStatus(targetId, effect.Status, 1);
                     break;
                     
                 case ReactionEffectType.REMOVE_STATUS:
-                    ActorOperations.RemoveStatus(actualTargetId, effect.Status);
+                    ActorOperations.RemoveStatus(targetId, effect.Status);
                     break;
                     
                 case ReactionEffectType.PUSH_COMMAND:
-                    var cmd = new AtomicCmd(effect.Command, eventData.SourceId, actualTargetId, effect.Value);
+                    var cmd = AtomicCmd.Attack(targetId, eventData.TargetId, effect.Value);
                     CommandSystem.PushCmd(cmd);
                     break;
                     
-                case ReactionEffectType.REFLECT_DAMAGE:
-                    if (eventData.Command == CmdOp.ATTACK)
-                    {
-                        ActorOperations.DealDamage(eventData.SourceId, effect.Value);
-                    }
-                    break;
-                    
                 case ReactionEffectType.EXECUTE_ATTACK:
-                    var attackCmd = CommandBuilder.MakeAttackCmd(eventData.SourceId, actualTargetId, effect.Value);
-                    CommandSystem.PushCmd(attackCmd);
+                    ProcessDelayedHLA(targetId, eventData.TargetId, HLA.BASIC_ATTACK);
                     break;
                     
                 case ReactionEffectType.EXECUTE_HLA:
-                    // 從Value解包HLA和目標ID
-                    HLA hla = (HLA)(effect.Value >> 8);
-                    byte hlaTarget = (byte)(effect.Value & 0xFF);
-                    
-                    // 執行完整HLA（這裡應該用簡化版本，只執行攻擊部分）
-                    ProcessDelayedHLA(eventData.SourceId, hlaTarget != 0 ? hlaTarget : actualTargetId, hla);
+                    ProcessDelayedHLA(targetId, eventData.TargetId, (HLA)effect.Value);
                     break;
-                    
-                // 其他效果類型...
             }
         }
         
-        // 處理延後的HLA（只執行攻擊部分）
+        // 處理延後的HLA執行
         private static void ProcessDelayedHLA(byte srcId, byte targetId, HLA hla)
         {
-            // 只處理HLA中的攻擊部分，防禦部分已在Intent Phase處理
-            switch (hla)
-            {
-                case HLA.BASIC_ATTACK:
-                    CommandSystem.PushCmd(CommandBuilder.MakeAttackCmd(srcId, targetId, 10));
-                    break;
-                    
-                case HLA.HEAVY_STRIKE:
-                    // 只執行攻擊部分，蓄力已在Intent Phase給予
-                    CommandSystem.PushCmd(CommandBuilder.MakeAttackCmd(srcId, targetId, 15));
-                    break;
-                    
-                case HLA.SHIELD_BASH:
-                    // 只執行攻擊部分，護甲已在Intent Phase給予
-                    CommandSystem.PushCmd(CommandBuilder.MakeAttackCmd(srcId, targetId, 8));
-                    break;
-                    
-                case HLA.COMBO_ATTACK:
-                    CommandSystem.PushCmd(CommandBuilder.MakeAttackCmd(srcId, targetId, 7));
-                    CommandSystem.PushCmd(CommandBuilder.MakeAttackCmd(srcId, targetId, 7));
-                    break;
-                    
-                case HLA.ENEMY_AGGRESSIVE:
-                    // 只執行攻擊部分，蓄力已在Intent Phase給予
-                    CommandSystem.PushCmd(CommandBuilder.MakeAttackCmd(srcId, targetId, 12));
-                    CommandSystem.PushCmd(CommandBuilder.MakeAttackCmd(srcId, targetId, 8));
-                    break;
-                    
-                case HLA.ENEMY_BERSERKER:
-                    CommandSystem.PushCmd(CommandBuilder.MakeAttackCmd(srcId, targetId, 6));
-                    CommandSystem.PushCmd(CommandBuilder.MakeAttackCmd(srcId, targetId, 6));
-                    CommandSystem.PushCmd(CommandBuilder.MakeAttackCmd(srcId, targetId, 6));
-                    break;
-                    
-                // 純防禦型HLA無攻擊部分
-                case HLA.BASIC_BLOCK:
-                case HLA.BASIC_CHARGE:
-                case HLA.CHARGED_BLOCK:
-                case HLA.POWER_CHARGE:
-                case HLA.ENEMY_DEFENSIVE:
-                case HLA.ENEMY_TURTLE:
-                    // 這些HLA沒有延後的攻擊效果
-                    break;
-            }
-        }
+            // 檢查Actor是否存活
+            if (!ActorManager.IsAlive(srcId) || !ActorManager.IsAlive(targetId))
+                return;
+            
+            // 直接處理HLA
+            HLASystem.ProcessHLA(srcId, targetId, hla);
         }
         
-        // 清理系統
+        // 重置系統
         public static void Reset()
         {
             s_activeRules.Clear();
@@ -343,23 +297,24 @@ namespace CombatCore
             s_eventQueue.Clear();
         }
         
-        // 除錯資訊
+        // 調試輸出
         public static void DebugPrintRules()
         {
             Console.WriteLine($"活躍反應規則數量: {s_activeRules.Count}");
             foreach (var rule in s_activeRules)
             {
-                Console.WriteLine($"  規則 {rule.Id}: {rule.Name} (觸發條件: {rule.Condition.Trigger})");
+                Console.WriteLine($"規則 {rule.Id}: {rule.Name}");
             }
         }
         
+        // 獲取活躍規則數量
         public static int GetActiveRuleCount() => s_activeRules.Count;
     }
     
-    // 反應系統事件發佈器 - 與Command系統整合
+    // 事件分發器 - 提供統一的介面來觸發各種事件
     public static class ReactionEventDispatcher
     {
-        // Command執行前事件
+        // 命令執行前事件
         public static void OnBeforeCommand(in AtomicCmd cmd)
         {
             var eventData = new ReactionEvent(
@@ -372,14 +327,14 @@ namespace CombatCore
             ReactionSystem.TriggerEvent(in eventData);
         }
         
-        // Command執行後事件
+        // 命令執行後事件
         public static void OnAfterCommand(in AtomicCmd cmd, in CommandResult result)
         {
             var eventData = new ReactionEvent(
                 ReactionTrigger.AFTER_COMMAND,
                 cmd.SrcId,
                 cmd.TargetId,
-                result.Value, // 使用實際結果值
+                result.Value,
                 cmd.Op
             );
             ReactionSystem.TriggerEvent(in eventData);
@@ -414,31 +369,31 @@ namespace CombatCore
         {
             var eventData = new ReactionEvent(
                 ReactionTrigger.ACTOR_DEATH,
-                0,
+                actorId,
                 actorId,
                 0
             );
             ReactionSystem.TriggerEvent(in eventData);
         }
         
-        // 護甲獲得事件
+        // 獲得護甲事件
         public static void OnBlockGained(byte actorId, ushort blockAmount)
         {
             var eventData = new ReactionEvent(
                 ReactionTrigger.ACTOR_BLOCK_GAINED,
-                0,
+                actorId,
                 actorId,
                 blockAmount
             );
             ReactionSystem.TriggerEvent(in eventData);
         }
         
-        // 蓄力獲得事件
+        // 獲得蓄力事件
         public static void OnChargeGained(byte actorId, byte chargeAmount)
         {
             var eventData = new ReactionEvent(
                 ReactionTrigger.ACTOR_CHARGE_GAINED,
-                0,
+                actorId,
                 actorId,
                 chargeAmount
             );
@@ -474,22 +429,16 @@ namespace CombatCore
         {
             var eventData = new ReactionEvent(
                 ReactionTrigger.PHASE_CHANGE,
-                (byte)fromPhase,
-                (byte)toPhase,
+                0,
+                0,
                 0,
                 CmdOp.NOP,
                 toPhase
             );
             ReactionSystem.TriggerEvent(in eventData);
-            
-            // 特別處理敵人階段開始
-            if (toPhase == PhaseId.ENEMY_PHASE)
-            {
-                OnEnemyPhaseStart();
-            }
         }
         
-        // 意圖宣告事件 ✅ 新增
+        // 意圖宣告事件
         public static void OnIntentDeclared(byte actorId, HLA hla, byte targetId = 0)
         {
             var eventData = new ReactionEvent(
@@ -501,7 +450,7 @@ namespace CombatCore
             ReactionSystem.TriggerEvent(in eventData);
         }
         
-        // 敵人階段開始事件 ✅ 新增
+        // 敵人階段開始事件
         public static void OnEnemyPhaseStart()
         {
             var eventData = new ReactionEvent(
@@ -591,4 +540,4 @@ namespace CombatCore
         // 重置規則ID計數器
         public static void ResetRuleIdCounter() => s_nextRuleId = 1;
     }
-}
+} 

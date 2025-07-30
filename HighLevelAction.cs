@@ -1,134 +1,81 @@
-// HLA.cs - 高階動作系統
+// HighLevelAction.cs - 高階動作系統（簡化版）
 // 戰術抽象：HLA → AtomicCmd[]序列翻譯
 
 using System;
 
 namespace CombatCore
 {
-    // HLA翻譯引擎 - 戰術意圖轉換為立即效果和延後效果
+    // HLA翻譯引擎 - 簡化版本
     public static class HLATranslator
     {
-        // ✅ 新的翻譯機制：分離立即和延後效果
-        public static void TranslateAndRegisterHLA(HLA hla, byte srcId, byte targetId)
-        {
-            // 1. 處理立即效果（BLOCK/CHARGE等）
-            ProcessImmediateEffects(hla, srcId);
-            
-            // 2. 註冊延後效果（ATTACK等）
-            RegisterDelayedEffects(hla, srcId, targetId);
-        }
-        
-        // 處理立即效果（Intent Phase執行）
-        private static void ProcessImmediateEffects(HLA hla, byte srcId)
+        // 簡化的HLA翻譯方法
+        public static int TranslateHLA(HLA hla, byte srcId, byte targetId, Span<AtomicCmd> buffer)
         {
             switch (hla)
             {
+                case HLA.BASIC_ATTACK:
+                    buffer[0] = CommandBuilder.MakeAttackCmd(srcId, targetId, 10);
+                    return 1;
+                    
                 case HLA.BASIC_BLOCK:
-                    CommandSystem.PushCmd(CommandBuilder.MakeBlockCmd(srcId, 5));
-                    break;
+                    buffer[0] = CommandBuilder.MakeBlockCmd(srcId, 5);
+                    return 1;
                     
                 case HLA.BASIC_CHARGE:
-                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 1));
-                    break;
+                    buffer[0] = CommandBuilder.MakeChargeCmd(srcId, 1);
+                    return 1;
                     
                 case HLA.HEAVY_STRIKE:
-                    // 立即蓄力，攻擊延後
-                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 2));
-                    break;
+                    buffer[0] = CommandBuilder.MakeChargeCmd(srcId, 2);
+                    buffer[1] = CommandBuilder.MakeAttackCmd(srcId, targetId, 15);
+                    return 2;
                     
                 case HLA.SHIELD_BASH:
-                    // 立即護甲，攻擊延後
-                    CommandSystem.PushCmd(CommandBuilder.MakeBlockCmd(srcId, 3));
-                    break;
+                    buffer[0] = CommandBuilder.MakeBlockCmd(srcId, 3);
+                    buffer[1] = CommandBuilder.MakeAttackCmd(srcId, targetId, 8);
+                    return 2;
                     
-                case HLA.CHARGED_BLOCK:
-                    // 立即蓄力和護甲
-                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 1));
-                    CommandSystem.PushCmd(CommandBuilder.MakeBlockCmd(srcId, 8));
-                    break;
-                    
-                case HLA.POWER_CHARGE:
-                    // 立即強力蓄力
-                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 2));
-                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 1));
-                    break;
+                case HLA.COMBO_ATTACK:
+                    buffer[0] = CommandBuilder.MakeAttackCmd(srcId, targetId, 8);
+                    buffer[1] = CommandBuilder.MakeAttackCmd(srcId, targetId, 8);
+                    return 2;
                     
                 case HLA.ENEMY_AGGRESSIVE:
-                    // 立即蓄力，攻擊延後
-                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 1));
-                    break;
+                    buffer[0] = CommandBuilder.MakeChargeCmd(srcId, 1);
+                    buffer[1] = CommandBuilder.MakeAttackCmd(srcId, targetId, 12);
+                    return 2;
                     
                 case HLA.ENEMY_DEFENSIVE:
-                    // 立即護甲和蓄力
-                    CommandSystem.PushCmd(CommandBuilder.MakeBlockCmd(srcId, 10));
-                    CommandSystem.PushCmd(CommandBuilder.MakeChargeCmd(srcId, 2));
-                    break;
+                    buffer[0] = CommandBuilder.MakeBlockCmd(srcId, 10);
+                    buffer[1] = CommandBuilder.MakeChargeCmd(srcId, 2);
+                    return 2;
                     
-                case HLA.ENEMY_TURTLE:
-                    // 立即雙重護甲
-                    CommandSystem.PushCmd(CommandBuilder.MakeBlockCmd(srcId, 8));
-                    CommandSystem.PushCmd(CommandBuilder.MakeBlockCmd(srcId, 6));
-                    break;
-                    
-                // 純攻擊型HLA無立即效果
-                case HLA.BASIC_ATTACK:
-                case HLA.COMBO_ATTACK:
                 case HLA.ENEMY_BERSERKER:
-                    // 這些HLA沒有立即效果，只有延後攻擊
-                    break;
+                    buffer[0] = CommandBuilder.MakeAttackCmd(srcId, targetId, 20);
+                    return 1;
+                    
+                default:
+                    return 0;
             }
         }
         
-        // 註冊延後效果（Enemy Phase觸發）
-        private static void RegisterDelayedEffects(HLA hla, byte srcId, byte targetId)
+        // 獲取基本動作類型
+        public static int GetBasicAction(HLA hla)
         {
-            // 檢查HLA是否有攻擊效果
-            if (!HasAttackEffect(hla)) return;
-            
-            // 創建延後攻擊的Reaction規則
-            var condition = new ReactionCondition(
-                ReactionTrigger.ENEMY_PHASE_START,
-                sourceFilter: srcId
-            );
-            
-            // 將HLA和目標打包到Value中
-            ushort packedValue = (ushort)((byte)hla << 8 | targetId);
-            
-            var effect = new ReactionEffect(
-                ReactionEffectType.EXECUTE_HLA,
-                255, // 255表示使用事件目標
-                packedValue
-            );
-            
-            var rule = new ReactionRule(
-                GetUniqueRuleId(),
-                condition,
-                effect,
-                $"延後攻擊-{hla}",
-                true // 一次性規則
-            );
-            
-            ReactionSystem.RegisterRule(rule);
+            return hla switch
+            {
+                HLA.BASIC_ATTACK => 1,
+                HLA.BASIC_BLOCK => 2,
+                HLA.BASIC_CHARGE => 3,
+                HLA.HEAVY_STRIKE => 4,
+                HLA.SHIELD_BASH => 5,
+                HLA.COMBO_ATTACK => 6,
+                HLA.ENEMY_AGGRESSIVE => 7,
+                HLA.ENEMY_DEFENSIVE => 8,
+                HLA.ENEMY_BERSERKER => 9,
+                _ => 0
+            };
         }
-        
-        // 檢查HLA是否包含攻擊效果
-        private static bool HasAttackEffect(HLA hla) => hla switch
-        {
-            HLA.BASIC_ATTACK => true,
-            HLA.HEAVY_STRIKE => true,
-            HLA.SHIELD_BASH => true,
-            HLA.COMBO_ATTACK => true,
-            HLA.ENEMY_AGGRESSIVE => true,
-            HLA.ENEMY_BERSERKER => true,
-            _ => false
-        };
-        
-        // 生成唯一的規則ID
-        private static byte s_nextRuleId = 100; // 從100開始避免與CommonReactions衝突
-        private static byte GetUniqueRuleId() => s_nextRuleId++;
-        
-        // 重置規則ID計數器
-        public static void ResetRuleIdCounter() => s_nextRuleId = 100;
     }
     
     // 敵人意圖資訊 - 供UI顯示
@@ -168,14 +115,19 @@ namespace CombatCore
         {
             if (!ActorManager.IsAlive(actorId)) return false;
             
-            // ✅ 使用新的翻譯機制：立即效果 + 延後效果註冊
-            HLATranslator.TranslateAndRegisterHLA(hla, actorId, targetId);
+            // 直接翻譯為命令
+            Span<AtomicCmd> buffer = stackalloc AtomicCmd[8];
+            int cmdCount = HLATranslator.TranslateHLA(hla, actorId, targetId, buffer);
             
-            // 觸發意圖宣告事件（處理立即效果）
-            ReactionEventDispatcher.OnIntentDeclared(actorId, hla, targetId);
+            // 推入命令
+            for (int i = 0; i < cmdCount; i++)
+                CommandSystem.PushCmd(buffer[i]);
             
-            // 執行立即效果
+            // 立即執行
             CommandSystem.ExecuteAll();
+            
+            // 觸發簡單事件
+            SimpleEventSystem.OnCardPlayed(actorId, GetBasicAction(hla));
             
             return true;
         }

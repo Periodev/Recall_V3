@@ -86,9 +86,6 @@ namespace CombatCore
         // ✅ Switch表達式分派 - 編譯時優化
         public static CommandResult ExecuteCmd(in AtomicCmd cmd) 
         {
-            // ✅ 觸發命令執行前事件
-            ReactionEventDispatcher.OnBeforeCommand(in cmd);
-            
             var result = cmd.Op switch   // ✅ switch + in
             {
                 CmdOp.NOP => CommandResult.SUCCESS,
@@ -171,12 +168,13 @@ namespace CombatCore
             // 執行傷害
             ushort actualDamage = ActorOperations.DealDamage(cmd.TargetId, damage);
             
-            // ✅ 觸發受傷事件
-            ReactionEventDispatcher.OnActorDamaged(cmd.TargetId, cmd.SrcId, actualDamage);
+            // 觸發簡化事件
+            SimpleEventSystem.OnActorDamaged(cmd.TargetId, cmd.SrcId, actualDamage);
             
             // 檢查目標是否死亡
             if (!ActorManager.IsAlive(cmd.TargetId))
             {
+                SimpleEventSystem.OnActorDeath(cmd.TargetId);
                 PushDelayedCmd(new AtomicCmd(CmdOp.ACTOR_DEATH, 0, cmd.TargetId, 0));
             }
             
@@ -193,9 +191,6 @@ namespace CombatCore
             
             ActorOperations.AddBlock(cmd.SrcId, cmd.Value);
             
-            // ✅ 觸發護甲獲得事件
-            ReactionEventDispatcher.OnBlockGained(cmd.SrcId, cmd.Value);
-            
             return new CommandResult(true, cmd.Value, $"獲得 {cmd.Value} 點護甲");
         }
         
@@ -210,9 +205,6 @@ namespace CombatCore
             byte chargeAmount = (byte)Math.Min(cmd.Value, CombatConstants.MAX_CHARGE);
             ActorOperations.AddCharge(cmd.SrcId, chargeAmount);
             
-            // ✅ 觸發蓄力獲得事件
-            ReactionEventDispatcher.OnChargeGained(cmd.SrcId, chargeAmount);
-            
             return new CommandResult(true, chargeAmount, $"獲得 {chargeAmount} 點蓄力");
         }
         
@@ -222,9 +214,6 @@ namespace CombatCore
                 return new CommandResult(false, 0, "治療目標已死亡");
             
             ushort healAmount = ActorOperations.Heal(cmd.TargetId, cmd.Value);
-            
-            // ✅ 觸發治療事件
-            ReactionEventDispatcher.OnActorHealed(cmd.TargetId, cmd.SrcId, healAmount);
             
             return new CommandResult(true, healAmount, $"治療 {healAmount} 點生命值");
         }
@@ -271,6 +260,7 @@ namespace CombatCore
         private static CommandResult HandleTurnEndCleanup(in AtomicCmd cmd)
         {
             ActorManager.EndTurnCleanup();
+            SimpleEventSystem.OnTurnEnd();  // 觸發回合結束事件
             return new CommandResult(true, 0, "回合結束清理完成");
         }
         
@@ -278,9 +268,6 @@ namespace CombatCore
         {
             if (ActorManager.IsAlive(cmd.TargetId))
             {
-                // ✅ 觸發死亡事件
-                ReactionEventDispatcher.OnActorDeath(cmd.TargetId);
-                
                 ActorManager.RemoveActor(cmd.TargetId);
                 return new CommandResult(true, 0, $"Actor {cmd.TargetId} 死亡");
             }

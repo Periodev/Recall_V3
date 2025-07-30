@@ -1,6 +1,6 @@
-// Phase.cs - 流程控制系統
+// Phase.cs - 流程控制系統（整合卡牌系統版本）
 // 回合制狀態機：Enemy Intent → Player Phase → Enemy Phase → Cleanup
-// 已整合Reaction系統事件觸發
+// ✅ 修改：玩家輸入改為卡牌驅動，移除直接HLA輸入
 
 using System;
 
@@ -13,7 +13,6 @@ namespace CombatCore
         public PhaseStep CurrentStep;
         public bool WaitingForInput;
         public byte CurrentActorId;     // 當前行動的Actor
-        public byte PlayerTargetId;     // 玩家選擇的目標
         public int TurnNumber;          // 回合數
         
         public void Reset()
@@ -22,7 +21,6 @@ namespace CombatCore
             CurrentStep = PhaseStep.INIT;
             WaitingForInput = false;
             CurrentActorId = 0;
-            PlayerTargetId = 0;
             TurnNumber = 0;
         }
     }
@@ -64,21 +62,47 @@ namespace CombatCore
             return true;
         }
         
-        // 設置玩家輸入
-        public static void SetPlayerInput(HLA playerHLA, byte targetId = 0)
+        // ✅ 新增：卡牌輸入接口（取代原本的HLA輸入）
+        public static bool PlayCard(int handIndex, byte targetId = 0)
         {
-            if (s_context.CurrentPhase == PhaseId.PLAYER_PHASE && s_context.WaitingForInput)
+            if (s_context.CurrentPhase != PhaseId.PLAYER_PHASE || !s_context.WaitingForInput)
             {
-                HLASystem.SetPlayerHLA(playerHLA);
-                s_context.PlayerTargetId = targetId;
-                s_context.WaitingForInput = false;
+                Console.WriteLine($"當前不能使用卡牌：Phase={s_context.CurrentPhase}, WaitingInput={s_context.WaitingForInput}");
+                return false;
             }
+            
+            // 檢查手牌索引有效性
+            var hand = SimpleDeckManager.GetHand();
+            if (handIndex < 0 || handIndex >= hand.Length)
+            {
+                Console.WriteLine($"無效的卡牌索引：{handIndex}，手牌數量：{hand.Length}");
+                return false;
+            }
+            
+            // 使用卡牌系統
+            bool success = SimpleDeckManager.UseCard(handIndex, targetId);
+            
+            if (success)
+            {
+                s_context.WaitingForInput = false;
+                Console.WriteLine($"✅ 成功使用卡牌 {handIndex}: {hand[handIndex].Name}");
+            }
+            else
+            {
+                Console.WriteLine($"❌ 使用卡牌失敗：{handIndex}");
+            }
+            
+            return success;
         }
+        
+        // ❌ 移除：直接HLA輸入接口
+        // public static void SetPlayerInput(HLA playerHLA, byte targetId = 0)
         
         // 獲取當前狀態
         public static PhaseId GetCurrentPhase() => s_context.CurrentPhase;
         public static PhaseStep GetCurrentStep() => s_context.CurrentStep;
         public static bool IsWaitingForInput() => s_context.WaitingForInput;
+        public static void SetWaitingForInput(bool waiting) => s_context.WaitingForInput = waiting;
         public static int GetTurnNumber() => s_context.TurnNumber;
         
         // ==================== Phase處理函數 ====================
@@ -103,7 +127,7 @@ namespace CombatCore
         
         private static PhaseResult EnemyIntent_Process(Span<byte> actorBuffer)
         {
-            // ✅ 修改：使用新的意圖宣告系統
+            // ✅ 使用新的意圖宣告機制（純UI數據，不執行）
             EnemyIntentSystem.DeclareAllEnemyIntents();
             
             s_context.CurrentStep = PhaseStep.END;
@@ -117,7 +141,7 @@ namespace CombatCore
             s_context.CurrentStep = PhaseStep.INIT;
             
             // ✅ 除錯：顯示敵人意圖 (遊戲中UI會顯示)
-            Console.WriteLine("敵人攻擊宣告完成，玩家可查看敵人意圖:");
+            Console.WriteLine("敵人攻擊宣告完成，玩家可查看敵人意圖並選擇卡牌:");
             EnemyIntentSystem.DebugPrintIntents();
             
             return PhaseResult.NEXT_PHASE;
@@ -147,38 +171,43 @@ namespace CombatCore
             }
             
             s_context.CurrentActorId = actorBuffer[0]; // 假設只有一個玩家
+            
+            // ✅ 新增：確保玩家有手牌可用
+            if (SimpleDeckManager.GetHandSize() == 0)
+            {
+                Console.WriteLine("玩家手牌為空，重新洗牌");
+                SimpleDeckManager.ShuffleAndDrawAll();
+            }
+            
+            // ✅ 顯示當前手牌狀態
+            Console.WriteLine($"玩家回合開始，當前手牌：");
+            SimpleDeckManager.DebugPrintHand();
+            
             s_context.CurrentStep = PhaseStep.INPUT;
             return PhaseResult.NEXT_STEP;
         }
         
         private static PhaseResult PlayerPhase_Input()
         {
-            // 等待玩家輸入
-            s_context.WaitingForInput = true;
-            
-            // ✅ 除錯：提醒玩家可查看敵人意圖 (遊戲中UI會顯示)
+            // 檢查是否已經有卡牌被使用
             if (s_context.WaitingForInput)
             {
-                Console.WriteLine("等待玩家輸入 - 可查看敵人意圖進行決策");
+                Console.WriteLine("⏳ 等待玩家選擇卡牌...");
                 return PhaseResult.WAIT_INPUT;
             }
             
-            s_context.CurrentStep = PhaseStep.PROCESS;
-            return PhaseResult.NEXT_STEP;
+            // 設置等待狀態並返回
+            s_context.WaitingForInput = true;
+            Console.WriteLine("⏳ 等待玩家選擇卡牌...");
+            return PhaseResult.WAIT_INPUT;
         }
         
         private static PhaseResult PlayerPhase_Process()
         {
-            // 處理玩家HLA
-            byte playerId = s_context.CurrentActorId;
-            byte targetId = s_context.PlayerTargetId;
+            // ✅ 修改：不再需要處理HLA，因為卡牌使用時已經處理了
+            // 卡牌系統的 UseCard() 會自動調用 HLASystem.ProcessHLA()
             
-            if (!HLASystem.ProcessPlayerHLA(playerId, targetId))
-            {
-                // HLA處理失敗，使用基礎攻擊作為後備
-                HLASystem.ProcessHLA(playerId, targetId, HLA.BASIC_ATTACK);
-            }
-            
+            Console.WriteLine("玩家卡牌效果已執行");
             s_context.CurrentStep = PhaseStep.EXECUTE;
             return PhaseResult.NEXT_STEP;
         }
@@ -186,7 +215,8 @@ namespace CombatCore
         private static PhaseResult PlayerPhase_Execute()
         {
             // 執行所有命令
-            CommandSystem.ExecuteAll();
+            int executedCount = CommandSystem.ExecuteAll();
+            Console.WriteLine($"執行了 {executedCount} 個命令");
             
             s_context.CurrentStep = PhaseStep.END;
             return PhaseResult.NEXT_STEP;
@@ -232,9 +262,8 @@ namespace CombatCore
         
         private static PhaseResult EnemyPhase_Process(Span<byte> actorBuffer)
         {
-            // ✅ 修改：執行之前宣告的意圖
-            Console.WriteLine("👹 Enemy Phase - 執行之前宣告的攻擊意圖:");
-            
+            // ✅ 新機制：執行之前宣告的意圖
+            Console.WriteLine("敵人執行之前宣告的攻擊意圖:");
             EnemyIntentSystem.ExecuteAllDeclaredIntents();
             
             s_context.CurrentStep = PhaseStep.EXECUTE;
@@ -244,7 +273,8 @@ namespace CombatCore
         private static PhaseResult EnemyPhase_Execute()
         {
             // 執行所有敵人命令
-            CommandSystem.ExecuteAll();
+            int executedCount = CommandSystem.ExecuteAll();
+            Console.WriteLine($"敵人執行了 {executedCount} 個命令");
             
             s_context.CurrentStep = PhaseStep.END;
             return PhaseResult.NEXT_STEP;
@@ -285,6 +315,9 @@ namespace CombatCore
             CommandSystem.PushCmd(AtomicCmd.TurnEndCleanup());
             CommandSystem.ExecuteAll();
             
+            // ✅ 新增：卡牌系統回合結束處理
+            SimpleDeckManager.OnTurnEnd();
+            
             s_context.CurrentStep = PhaseStep.END;
             return PhaseResult.NEXT_STEP;
         }
@@ -297,12 +330,10 @@ namespace CombatCore
             // ✅ 觸發新回合開始事件
             SimpleEventSystem.OnTurnStart();
             
-            var oldPhase = s_context.CurrentPhase;
             s_context.CurrentPhase = PhaseId.ENEMY_INTENT;
             s_context.CurrentStep = PhaseStep.INIT;
             
-            // ✅ 觸發Phase轉換事件
-            // SimpleEventSystem 會在具體的 Phase 處理中觸發
+            Console.WriteLine($"=== 回合 {s_context.TurnNumber} 開始 ===");
             
             return PhaseResult.NEXT_PHASE;
         }
@@ -313,7 +344,7 @@ namespace CombatCore
         {
             Console.WriteLine($"Phase: {s_context.CurrentPhase}, Step: {s_context.CurrentStep}");
             Console.WriteLine($"Turn: {s_context.TurnNumber}, WaitingInput: {s_context.WaitingForInput}");
-            Console.WriteLine($"CurrentActor: {s_context.CurrentActorId}, Target: {s_context.PlayerTargetId}");
+            Console.WriteLine($"CurrentActor: {s_context.CurrentActorId}");
         }
         
         // 重置Phase系統
@@ -322,7 +353,8 @@ namespace CombatCore
             s_context.Reset();
             HLASystem.Reset();
             CommandSystem.Clear();
-            SimpleEventSystem.Reset();  // ✅ 重置簡化事件系統
+            SimpleEventSystem.Reset();  // ✅ 重置事件系統
+            EnemyIntentSystem.ClearIntents(); // ✅ 清理敵人意圖
         }
         
         // 檢查戰鬥是否結束
@@ -352,7 +384,7 @@ namespace CombatCore
             
             int enemyCount = 0;
             enemyCount += ActorManager.GetActorsByType(ActorType.ENEMY_BASIC, buffer);
-            enemyCount += ActorManager.GetActorsByType(ActorType.ENEMY_ELITE, buffer[enemyCount..]);
+            enemyCount += ActorManager.GetActorsByType(ActorType.ENEMY_ELITE, buffer[enemyCount..]);  
             enemyCount += ActorManager.GetActorsByType(ActorType.ENEMY_BOSS, buffer[enemyCount..]);
             
             if (enemyCount == 0) return "勝利";
@@ -361,7 +393,7 @@ namespace CombatCore
         }
     }
     
-    // 簡單的戰鬥管理器 - 整合所有系統
+    // ✅ 修改：卡牌驅動的戰鬥管理器
     public static class CombatManager
     {
         // 初始化戰鬥
@@ -369,6 +401,11 @@ namespace CombatCore
         {
             ActorManager.Reset();
             PhaseSystem.Initialize();
+            SimpleEventSystem.Initialize(); // ✅ 初始化事件系統
+            
+            // ✅ 初始化卡牌系統
+            SimpleDeckManager.SetDeckConfig(DeckConfig.DEFAULT);
+            SimpleDeckManager.StartCombat();
             
             // 創建玩家
             byte playerId = ActorManager.AllocateActor(ActorType.PLAYER, 100);
@@ -377,8 +414,9 @@ namespace CombatCore
             ActorManager.AllocateActor(ActorType.ENEMY_BASIC, 50);
             ActorManager.AllocateActor(ActorType.ENEMY_BASIC, 40);
             
-            // 觸發初始回合開始事件
-            SimpleEventSystem.OnTurnStart();
+            Console.WriteLine("戰鬥初始化完成");
+            Console.WriteLine("牌組配置:");
+            SimpleDeckManager.DebugPrintDeckConfig();
         }
         
         // 執行一步戰鬥流程
@@ -387,13 +425,16 @@ namespace CombatCore
             return PhaseSystem.ExecuteCurrentStep();
         }
         
-        // 輸入玩家動作
-        public static void InputPlayerAction(HLA hla, byte targetId = 1)
+        // ❌ 移除：直接HLA輸入
+        // public static void InputPlayerAction(HLA hla, byte targetId = 1)
+        
+        // ✅ 新增：卡牌輸入
+        public static bool PlayPlayerCard(int handIndex, byte targetId = 1)
         {
-            PhaseSystem.SetPlayerInput(hla, targetId);
+            return PhaseSystem.PlayCard(handIndex, targetId);
         }
         
-        // 運行完整戰鬥循環直到結束
+        // ✅ 修改：運行完整戰鬥循環使用卡牌AI
         public static string RunCombatToEnd(int maxTurns = 50)
         {
             InitializeCombat();
@@ -407,11 +448,13 @@ namespace CombatCore
                 
                 var result = StepCombat();
                 
-                // 如果需要玩家輸入，提供簡單的AI輸入
+                // 如果需要玩家輸入，使用自動卡牌AI
                 if (result == PhaseResult.WAIT_INPUT)
                 {
-                    InputPlayerAction(HLA.BASIC_ATTACK, 1); // 攻擊第一個敵人
-                    StepCombat(); // 處理輸入
+                    Console.WriteLine($"🔄 回合 {turn}: 檢測到WAIT_INPUT，調用自動AI");
+                    AutoPlayPlayerCards();
+                    Console.WriteLine($"🔄 回合 {turn}: AI選擇完成，繼續執行");
+                    StepCombat(); // 處理卡牌使用結果
                 }
                 
                 if (result == PhaseResult.ERROR)
@@ -421,6 +464,79 @@ namespace CombatCore
             }
             
             return PhaseSystem.GetCombatResult();
+        }
+        
+        // ✅ 新增：自動卡牌AI
+        private static void AutoPlayPlayerCards()
+        {
+            var hand = SimpleDeckManager.GetHand();
+            Console.WriteLine($"🤖 自動AI選擇卡牌，手牌數: {hand.Length}");
+            
+            if (hand.Length == 0)
+            {
+                Console.WriteLine("❌ 手牌為空！");
+                return;
+            }
+            
+            // 簡單AI：優先攻擊 > 蓄力 > 格擋
+            byte target = GetDefaultEnemyTarget();
+            
+            // 1. 尋找攻擊卡
+            for (int i = 0; i < hand.Length; i++)
+            {
+                if (hand[i].Action == BasicAction.ATTACK && target != 0)
+                {
+                    if (SimpleDeckManager.UseCard(i, target))
+                    {
+                        Console.WriteLine($"🤖 AI使用攻擊卡攻擊敵人{target}");
+                        PhaseSystem.SetWaitingForInput(false); // 通過PhaseSystem設置狀態
+                        return;
+                    }
+                }
+            }
+            
+            // 2. 尋找蓄力卡
+            for (int i = 0; i < hand.Length; i++)
+            {
+                if (hand[i].Action == BasicAction.CHARGE)
+                {
+                    if (SimpleDeckManager.UseCard(i, 0))
+                    {
+                        Console.WriteLine("🤖 AI使用蓄力卡");
+                        PhaseSystem.SetWaitingForInput(false); // 通過PhaseSystem設置狀態
+                        return;
+                    }
+                }
+            }
+            
+            // 3. 尋找格擋卡
+            for (int i = 0; i < hand.Length; i++)
+            {
+                if (hand[i].Action == BasicAction.BLOCK)
+                {
+                    if (SimpleDeckManager.UseCard(i, 0))
+                    {
+                        Console.WriteLine("🤖 AI使用格擋卡");
+                        PhaseSystem.SetWaitingForInput(false); // 通過PhaseSystem設置狀態
+                        return;
+                    }
+                }
+            }
+            
+            Console.WriteLine("❌ AI無法找到可用的卡牌");
+        }
+        
+        // 獲取預設敵人目標
+        private static byte GetDefaultEnemyTarget()
+        {
+            Span<byte> enemyBuffer = stackalloc byte[16];
+            int enemyCount = 0;
+            
+            enemyCount += ActorManager.GetActorsByType(ActorType.ENEMY_BASIC, enemyBuffer);
+            enemyCount += ActorManager.GetActorsByType(ActorType.ENEMY_ELITE, enemyBuffer[enemyCount..]);
+            enemyCount += ActorManager.GetActorsByType(ActorType.ENEMY_BOSS, enemyBuffer[enemyCount..]);
+            
+            return enemyCount > 0 ? enemyBuffer[0] : (byte)0;
         }
     }
 }

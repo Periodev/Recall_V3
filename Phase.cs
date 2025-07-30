@@ -103,8 +103,8 @@ namespace CombatCore
         
         private static PhaseResult EnemyIntent_Process(Span<byte> actorBuffer)
         {
-            // ✅ 使用新的意圖宣告機制
-            CombatAI.DecideAndDeclareForAllEnemies();
+            // ✅ 修改：使用新的意圖宣告系統
+            EnemyIntentSystem.DeclareAllEnemyIntents();
             
             s_context.CurrentStep = PhaseStep.END;
             return PhaseResult.NEXT_STEP;
@@ -118,7 +118,7 @@ namespace CombatCore
             
             // ✅ 除錯：顯示敵人意圖 (遊戲中UI會顯示)
             Console.WriteLine("敵人攻擊宣告完成，玩家可查看敵人意圖:");
-            HLASystem.DebugPrintEnemyIntents();
+            EnemyIntentSystem.DebugPrintIntents();
             
             return PhaseResult.NEXT_PHASE;
         }
@@ -232,11 +232,11 @@ namespace CombatCore
         
         private static PhaseResult EnemyPhase_Process(Span<byte> actorBuffer)
         {
-            // ✅ 新機制：不再手動執行HLA，而是依賴Reaction系統
-            // Enemy Phase Start事件會自動觸發所有延後的攻擊效果
-            Console.WriteLine("敵人執行之前宣告的攻擊意圖 (透過Reaction系統):");
+            // ✅ 修改：執行之前宣告的意圖
+            Console.WriteLine("👹 Enemy Phase - 執行之前宣告的攻擊意圖:");
             
-            // Reaction系統會自動處理延後效果，這裡只需要執行結果
+            EnemyIntentSystem.ExecuteAllDeclaredIntents();
+            
             s_context.CurrentStep = PhaseStep.EXECUTE;
             return PhaseResult.NEXT_STEP;
         }
@@ -279,7 +279,7 @@ namespace CombatCore
         private static PhaseResult Cleanup_Process()
         {
             // ✅ 觸發回合結束事件
-            ReactionEventDispatcher.OnTurnEnd(s_context.TurnNumber);
+            SimpleEventSystem.OnTurnEnd();
             
             // 推入回合結束清理命令
             CommandSystem.PushCmd(AtomicCmd.TurnEndCleanup());
@@ -295,14 +295,14 @@ namespace CombatCore
             s_context.TurnNumber++;
             
             // ✅ 觸發新回合開始事件
-            ReactionEventDispatcher.OnTurnStart(s_context.TurnNumber);
+            SimpleEventSystem.OnTurnStart();
             
             var oldPhase = s_context.CurrentPhase;
             s_context.CurrentPhase = PhaseId.ENEMY_INTENT;
             s_context.CurrentStep = PhaseStep.INIT;
             
             // ✅ 觸發Phase轉換事件
-            ReactionEventDispatcher.OnPhaseChange(oldPhase, s_context.CurrentPhase);
+            // SimpleEventSystem 會在具體的 Phase 處理中觸發
             
             return PhaseResult.NEXT_PHASE;
         }
@@ -322,7 +322,7 @@ namespace CombatCore
             s_context.Reset();
             HLASystem.Reset();
             CommandSystem.Clear();
-            ReactionSystem.Reset();  // ✅ 重置Reaction系統
+            SimpleEventSystem.Reset();  // ✅ 重置簡化事件系統
         }
         
         // 檢查戰鬥是否結束
@@ -378,7 +378,7 @@ namespace CombatCore
             ActorManager.AllocateActor(ActorType.ENEMY_BASIC, 40);
             
             // 觸發初始回合開始事件
-            ReactionEventDispatcher.OnTurnStart(0);
+            SimpleEventSystem.OnTurnStart();
         }
         
         // 執行一步戰鬥流程

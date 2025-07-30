@@ -175,7 +175,7 @@ namespace CombatCore
             // 反傷效果
             if (s_thornsEnabled && IsPlayer(targetId) && srcId != 0)
             {
-                var thornsCmd = CommandBuilder.MakeAttackCmd(targetId, srcId, s_thornsDamage);
+                var thornsCmd = CommandBuilder.MakeAttackCmd(targetId, srcId, (ushort)s_thornsDamage);
                 CommandSystem.PushCmd(thornsCmd);
                 Console.WriteLine($"反傷效果觸發！對敵人造成 {s_thornsDamage} 點傷害");
             }
@@ -203,7 +203,7 @@ namespace CombatCore
                 var playerId = GetPlayerId();
                 if (playerId != 255)
                 {
-                    var healCmd = CommandBuilder.Heal(playerId, playerId, (ushort)s_healingAmount);
+                    var healCmd = CommandBuilder.MakeHealCmd(playerId, playerId, (ushort)s_healingAmount);
                     CommandSystem.PushCmd(healCmd);
                     Console.WriteLine($"回合結束自癒效果觸發！恢復 {s_healingAmount} 點生命");
                 }

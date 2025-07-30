@@ -102,7 +102,7 @@ namespace CombatCore
             };
             
             // ✅ 觸發命令執行後事件
-            ReactionEventDispatcher.OnAfterCommand(in cmd, in result);
+            // SimpleEventSystem 會在具體的 Handle 方法中觸發
             
             return result;
         }
@@ -287,6 +287,9 @@ namespace CombatCore
             
         public static AtomicCmd MakeChargeCmd(byte srcId, byte chargeAmount = 1)
             => AtomicCmd.Charge(srcId, chargeAmount);
+            
+        public static AtomicCmd MakeHealCmd(byte srcId, byte targetId, ushort healAmount = 5)
+            => AtomicCmd.Heal(srcId, targetId, healAmount);
             
         // 組合操作命令
         public static void BuildHeavyStrike(byte srcId, byte targetId, Span<AtomicCmd> buffer, out int count)

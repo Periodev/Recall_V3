@@ -81,10 +81,11 @@ namespace CombatCore
             
             // 使用卡牌系統
             bool success = SimpleDeckManager.UseCard(handIndex, targetId);
-            
+
             if (success)
             {
                 s_context.WaitingForInput = false;
+                s_context.CurrentStep = PhaseStep.PROCESS;
                 Console.WriteLine($"✅ 成功使用卡牌 {handIndex}: {hand[handIndex].Name}");
             }
             else

@@ -192,31 +192,38 @@ namespace CombatCoreTest
             SimpleDeckManager.DebugPrintHand();
             
             // 測試各種卡牌使用
-            var hand = SimpleDeckManager.GetHand();
-            Console.WriteLine($"\n開始測試 {hand.Length} 張卡牌的使用:");
-            
-            for (int i = 0; i < Math.Min(hand.Length, 3); i++) // 只測試前3張
+            var initialHand = SimpleDeckManager.GetHand();
+            Console.WriteLine($"\n開始測試 {initialHand.Length} 張卡牌的使用:");
+
+            for (int i = 0; i < 3; i++) // 只測試前3張
             {
+                var hand = SimpleDeckManager.GetHand();
+                if (i >= hand.Length)
+                {
+                    Console.WriteLine("手牌已用完");
+                    break;
+                }
+
                 var card = hand[i];
                 Console.WriteLine($"\n--- 測試卡牌 {i}: [{card.Symbol}] {card.Name} ---");
-                
+
                 // 記錄使用前狀態
                 PrintActorStatus(playerId, "玩家", "使用前");
                 PrintActorStatus(enemyId, "敵人", "使用前");
-                
+
                 // 選擇目標
                 byte targetId = card.RequiresTarget ? enemyId : (byte)0;
-                
+
                 // 使用卡牌
                 bool success = SimpleDeckManager.UseCard(i, targetId);
                 Console.WriteLine($"使用結果: {(success ? "✅ 成功" : "❌ 失敗")}");
-                
+
                 // 記錄使用後狀態
                 PrintActorStatus(playerId, "玩家", "使用後");
                 PrintActorStatus(enemyId, "敵人", "使用後");
-                
+
                 Console.WriteLine($"剩餘手牌數: {SimpleDeckManager.GetHandSize()}");
-                
+
                 if (SimpleDeckManager.GetHandSize() == 0)
                 {
                     Console.WriteLine("手牌已用完");

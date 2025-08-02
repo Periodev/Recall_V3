@@ -79,6 +79,9 @@ namespace CombatCore
                 return false;
             }
             
+            // 先記錄欲使用的卡牌
+            var card = hand[handIndex];
+
             // 使用卡牌系統
             bool success = SimpleDeckManager.UseCard(handIndex, targetId);
 
@@ -86,7 +89,7 @@ namespace CombatCore
             {
                 s_context.WaitingForInput = false;
                 s_context.CurrentStep = PhaseStep.PROCESS;
-                Console.WriteLine($"✅ 成功使用卡牌 {handIndex}: {hand[handIndex].Name}");
+                Console.WriteLine($"✅ 成功使用卡牌 {handIndex}: {card.Name}");
             }
             else
             {

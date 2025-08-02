@@ -55,7 +55,9 @@ namespace CombatCore
                 // ✅ 存儲意圖，不執行
                 var intent = new EnemyIntent(enemyId, decidedHLA, playerTargetId, description, estimatedDamage);
                 s_declaredIntents[enemyId] = intent;
-                
+
+                SimpleEventSystem.OnEnemyIntentDeclared(enemyId, decidedHLA);
+
                 Console.WriteLine($"敵人 {enemyId} 宣告意圖: {description} (預計傷害: {estimatedDamage})");
             }
         }
@@ -87,6 +89,8 @@ namespace CombatCore
                 // ✅ 現在才真正執行HLA
                 Console.WriteLine($"敵人 {enemyId} 執行: {intent.Description}");
                 HLASystem.ProcessHLA(enemyId, intent.TargetId, intent.DeclaredAction);
+
+                SimpleEventSystem.OnEnemyIntentExecuted(enemyId, intent.DeclaredAction);
             }
         }
         

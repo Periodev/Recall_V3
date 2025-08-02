@@ -10,6 +10,7 @@ namespace CombatCore
     {
         // 核心容量限制
         public const int MAX_ACTORS = 64;           // Actor池大小
+        public const byte INVALID_ACTOR_ID = 255;  // 無效Actor ID
         public const int MAX_COMMANDS = 256;        // 命令佇列大小
         public const int MAX_HLA_TRANSLATION = 16;  // HLA翻譯緩衝區大小
         

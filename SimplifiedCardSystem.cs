@@ -497,6 +497,11 @@ namespace CombatCore
     // 簡化的卡牌使用輔助（增強版）
     public static class SimpleCardHelper
     {
+        // ✅ 靜態優先級陣列，避免重複分配
+        private static readonly BasicAction[] s_normalPriority = { 
+            BasicAction.ATTACK, BasicAction.CHARGE, BasicAction.BLOCK 
+        };
+
         // 使用指定索引的卡牌
         public static bool PlayCard(int handIndex, byte targetId = 0)
         {
@@ -576,7 +581,7 @@ namespace CombatCore
             enemyCount += ActorManager.GetActorsByType(ActorType.ENEMY_ELITE, enemyBuffer[enemyCount..]);
             enemyCount += ActorManager.GetActorsByType(ActorType.ENEMY_BOSS, enemyBuffer[enemyCount..]);
             
-            return enemyCount > 0 ? enemyBuffer[0] : (byte)0;
+            return enemyCount > 0 ? enemyBuffer[0] : CombatConstants.INVALID_ACTOR_ID;
         }
         
         // ✅ 增強：智能卡牌選擇（考慮戰鬥狀況）
@@ -594,7 +599,7 @@ namespace CombatCore
             
             // 檢查是否有敵人
             byte enemyTarget = GetDefaultEnemyTarget();
-            bool hasEnemies = enemyTarget != 0;
+            bool hasEnemies = enemyTarget != CombatConstants.INVALID_ACTOR_ID;
             
             // 智能決策邏輯
             
@@ -618,8 +623,8 @@ namespace CombatCore
                 }
             }
             
-            // 3. 正常情況：攻擊 > 蓄力 > 格擋
-            foreach (var actionPriority in new[] { BasicAction.ATTACK, BasicAction.CHARGE, BasicAction.BLOCK })
+            // 3. 正常情況：使用靜態優先級陣列
+            foreach (var actionPriority in s_normalPriority)
             {
                 for (int i = 0; i < hand.Length; i++)
                 {

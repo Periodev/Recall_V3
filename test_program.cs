@@ -517,7 +517,9 @@ namespace CombatCoreTest
             int count = ActorManager.GetActorsByType(ActorType.ENEMY_BASIC, buffer);
             count += ActorManager.GetActorsByType(ActorType.ENEMY_ELITE, buffer[count..]);
             count += ActorManager.GetActorsByType(ActorType.ENEMY_BOSS, buffer[count..]);
-            return count > 0 ? buffer[0] : (byte)1;
+            
+            // ✅ 修改：返回無效ID而非硬編碼1
+            return count > 0 ? buffer[0] : CombatConstants.INVALID_ACTOR_ID; // 255 = 無效ID
         }
     }
 }

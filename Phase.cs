@@ -458,12 +458,42 @@ namespace CombatCore
                     Console.WriteLine($"🔄 回合 {turn}: 檢測到WAIT_INPUT，調用自動AI");
                     AutoPlayPlayerCards();
                     Console.WriteLine($"🔄 回合 {turn}: AI選擇完成，繼續執行");
-                    StepCombat(); // 處理卡牌使用結果
+                    
+                    // ✅ 修改：檢查第二次StepCombat的結果
+                    var secondResult = StepCombat();
+                    Console.WriteLine($"🔄 回合 {turn}: 第二次StepCombat結果: {secondResult}");
+                    
+                    // ✅ 處理第二次結果
+                    if (secondResult == PhaseResult.ERROR)
+                    {
+                        Console.WriteLine($"❌ 第二次StepCombat返回錯誤，戰鬥異常結束");
+                        return "錯誤";
+                    }
+                    
+                    if (secondResult == PhaseResult.WAIT_INPUT)
+                    {
+                        Console.WriteLine($"⚠️ 第二次StepCombat仍然等待輸入，可能是AI失敗");
+                        // 可以選擇重試AI或者標記為錯誤
+                        continue; // 重試整個流程
+                    }
+                    
+                    if (secondResult == PhaseResult.COMBAT_END)
+                    {
+                        Console.WriteLine($"🏁 第二次StepCombat檢測到戰鬥結束");
+                        break;
+                    }
                 }
                 
                 if (result == PhaseResult.ERROR)
                 {
+                    Console.WriteLine($"❌ StepCombat返回錯誤");
                     return "錯誤";
+                }
+                
+                if (result == PhaseResult.COMBAT_END)
+                {
+                    Console.WriteLine($"🏁 StepCombat檢測到戰鬥結束");
+                    break;
                 }
             }
             
@@ -543,7 +573,7 @@ namespace CombatCore
             enemyCount += ActorManager.GetActorsByType(ActorType.ENEMY_ELITE, enemyBuffer[enemyCount..]);
             enemyCount += ActorManager.GetActorsByType(ActorType.ENEMY_BOSS, enemyBuffer[enemyCount..]);
             
-            return enemyCount > 0 ? enemyBuffer[0] : (byte)0;
+            return enemyCount > 0 ? enemyBuffer[0] : CombatConstants.INVALID_ACTOR_ID;
         }
     }
 }

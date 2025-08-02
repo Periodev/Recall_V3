@@ -146,41 +146,41 @@ namespace CombatCore
         public static int GetDelayedQueueCount() => s_delayedCommands.Count;
         
         // ==================== 命令處理函數 ====================
-        
-        private static CommandResult HandleAttack(in AtomicCmd cmd)
+       private static CommandResult HandleAttack(in AtomicCmd cmd)
         {
             if (!ActorManager.IsAlive(cmd.SrcId) || !ActorManager.IsAlive(cmd.TargetId))
                 return new CommandResult(false, 0, "攻擊者或目標已死亡");
                 
             if (!ActorManager.CanAct(cmd.SrcId))
                 return new CommandResult(false, 0, "攻擊者無法行動");
+
+            ushort baseDamage = cmd.Value;
             
-            ref var attacker = ref ActorManager.GetActor(cmd.SrcId);
-            ushort damage = cmd.Value;
+            // ✅ 純粹調用 Actor API：檢查並消耗 charge
+            byte consumedCharge = ActorOperations.ConsumeCharge(cmd.SrcId); // 消耗全部 charge
             
-            // 蓄力加成
-            if (attacker.Charge > 0)
-            {
-                damage = (ushort)(damage + attacker.Charge * CombatConstants.CHARGE_DAMAGE_BONUS);
-                attacker.Charge = 0;  // 消耗蓄力
-            }
+            // ✅ 計算最終傷害
+            ushort finalDamage = (ushort)(baseDamage + consumedCharge * CombatConstants.CHARGE_DAMAGE_BONUS);
             
-            // 執行傷害
-            ushort actualDamage = ActorOperations.DealDamage(cmd.TargetId, damage);
+            // ✅ 純粹調用 Actor API：造成傷害
+            ushort actualDamage = ActorOperations.DealDamage(cmd.TargetId, finalDamage);
             
-            // 觸發簡化事件
+            // ✅ 觸發事件（不是狀態變更）
             SimpleEventSystem.OnActorDamaged(cmd.TargetId, cmd.SrcId, actualDamage);
             
-            // 檢查目標是否死亡
+            // ✅ 檢查死亡並推入後續命令
             if (!ActorManager.IsAlive(cmd.TargetId))
             {
                 SimpleEventSystem.OnActorDeath(cmd.TargetId);
                 PushDelayedCmd(new AtomicCmd(CmdOp.ACTOR_DEATH, 0, cmd.TargetId, 0));
             }
             
-            return new CommandResult(true, actualDamage, $"造成 {actualDamage} 點傷害");
+            string message = consumedCharge > 0 
+                ? $"消耗{consumedCharge}蓄力，造成 {actualDamage} 點傷害" 
+                : $"造成 {actualDamage} 點傷害";
+            
+            return new CommandResult(true, actualDamage, message);
         }
-        
         private static CommandResult HandleBlock(in AtomicCmd cmd)
         {
             if (!ActorManager.IsAlive(cmd.SrcId))
@@ -188,10 +188,23 @@ namespace CombatCore
                 
             if (!ActorManager.CanAct(cmd.SrcId))
                 return new CommandResult(false, 0, "格擋者無法行動");
+
+            ushort baseBlock = cmd.Value;
             
-            ActorOperations.AddBlock(cmd.SrcId, cmd.Value);
+            // ✅ 純粹調用 Actor API：檢查並消耗 charge  
+            byte consumedCharge = ActorOperations.ConsumeCharge(cmd.SrcId); // 消耗全部 charge
             
-            return new CommandResult(true, cmd.Value, $"獲得 {cmd.Value} 點護甲");
+            // ✅ 計算最終護甲
+            ushort finalBlock = (ushort)(baseBlock + consumedCharge * CombatConstants.CHARGE_DAMAGE_BONUS);
+            
+            // ✅ 純粹調用 Actor API：增加護甲
+            ushort actualBlock = ActorOperations.AddBlock(cmd.SrcId, finalBlock);
+            
+            string message = consumedCharge > 0 
+                ? $"消耗{consumedCharge}蓄力，獲得 {actualBlock} 點護甲" 
+                : $"獲得 {actualBlock} 點護甲";
+            
+            return new CommandResult(true, actualBlock, message);
         }
         
         private static CommandResult HandleCharge(in AtomicCmd cmd)
@@ -201,18 +214,21 @@ namespace CombatCore
                 
             if (!ActorManager.CanAct(cmd.SrcId))
                 return new CommandResult(false, 0, "蓄力者無法行動");
-            
+
             byte chargeAmount = (byte)Math.Min(cmd.Value, CombatConstants.MAX_CHARGE);
-            ActorOperations.AddCharge(cmd.SrcId, chargeAmount);
             
-            return new CommandResult(true, chargeAmount, $"獲得 {chargeAmount} 點蓄力");
+            // ✅ 純粹調用 Actor API：增加蓄力
+            byte actualCharge = ActorOperations.AddCharge(cmd.SrcId, chargeAmount);
+            
+            return new CommandResult(true, actualCharge, $"獲得 {actualCharge} 點蓄力");
         }
         
         private static CommandResult HandleHeal(in AtomicCmd cmd)
         {
             if (!ActorManager.IsAlive(cmd.TargetId))
                 return new CommandResult(false, 0, "治療目標已死亡");
-            
+
+            // ✅ 純粹調用 Actor API：治療
             ushort healAmount = ActorOperations.Heal(cmd.TargetId, cmd.Value);
             
             return new CommandResult(true, healAmount, $"治療 {healAmount} 點生命值");
@@ -222,12 +238,14 @@ namespace CombatCore
         {
             if (!ActorManager.IsAlive(cmd.TargetId))
                 return new CommandResult(false, 0, "狀態目標已死亡");
-            
+
             // 從Value解包狀態和持續時間
             StatusFlags status = (StatusFlags)(cmd.Value >> 8);
             byte duration = (byte)(cmd.Value & 0xFF);
             
+            // ✅ 純粹調用 Actor API：添加狀態
             ActorOperations.AddStatus(cmd.TargetId, status, duration);
+            
             return new CommandResult(true, duration, $"添加狀態 {status}，持續 {duration} 回合");
         }
         
@@ -235,9 +253,12 @@ namespace CombatCore
         {
             if (!ActorManager.IsAlive(cmd.TargetId))
                 return new CommandResult(false, 0, "狀態目標已死亡");
-            
+
             StatusFlags status = (StatusFlags)cmd.Value;
+            
+            // ✅ 純粹調用 Actor API：移除狀態
             bool removed = ActorOperations.RemoveStatus(cmd.TargetId, status);
+            
             return new CommandResult(removed, 0, removed ? $"移除狀態 {status}" : $"目標沒有狀態 {status}");
         }
         
@@ -259,8 +280,50 @@ namespace CombatCore
         
         private static CommandResult HandleTurnEndCleanup(in AtomicCmd cmd)
         {
-            ActorManager.EndTurnCleanup();
-            SimpleEventSystem.OnTurnEnd();  // 觸發回合結束事件
+            // ✅ 使用 Actor API 進行回合結束清理
+            Span<byte> actorBuffer = stackalloc byte[CombatConstants.MAX_ACTORS];
+            int actorCount = ActorManager.GetAliveActors(actorBuffer);
+            
+            for (int i = 0; i < actorCount; i++)
+            {
+                byte actorId = actorBuffer[i];
+                
+                // 護甲歸零
+                ActorOperations.ClearBlock(actorId);
+                
+                // 狀態持續時間減少（保持原有邏輯，因為涉及字典操作）
+                ref var actor = ref ActorManager.GetActor(actorId);
+                if (actor.StatusDurations != null && actor.StatusDurations.Count > 0)
+                {
+                    var statusesToRemove = new List<StatusFlags>();
+                    var statusesToUpdate = new List<(StatusFlags status, byte duration)>();
+                    
+                    foreach (var kvp in actor.StatusDurations)
+                    {
+                        byte newDuration = (byte)(kvp.Value - 1);
+                        if (newDuration <= 0)
+                        {
+                            statusesToRemove.Add(kvp.Key);
+                        }
+                        else
+                        {
+                            statusesToUpdate.Add((kvp.Key, newDuration));
+                        }
+                    }
+                    
+                    foreach (var status in statusesToRemove)
+                    {
+                        ActorOperations.RemoveStatus(actorId, status);
+                    }
+                    
+                    foreach (var (status, duration) in statusesToUpdate)
+                    {
+                        ActorOperations.AddStatus(actorId, status, duration);
+                    }
+                }
+            }
+            
+            SimpleEventSystem.OnTurnEnd();
             return new CommandResult(true, 0, "回合結束清理完成");
         }
         

@@ -190,64 +190,139 @@ namespace CombatCore
     // Actor操作輔助方法 - 常用的Actor修改操作
     public static class ActorOperations
     {
+        // ==================== 核心狀態變更 API ====================
+        
+        // 生命值操作
+        public static ushort SetHP(byte actorId, ushort newHP)
+        {
+            ref var actor = ref ActorManager.GetActor(actorId);
+            ushort oldHP = actor.HP;
+            actor.HP = (ushort)Math.Min(newHP, actor.MaxHP);
+            return (ushort)Math.Abs(actor.HP - oldHP);
+        }
+        
+        public static ushort ReduceHP(byte actorId, ushort amount)
+        {
+            ref var actor = ref ActorManager.GetActor(actorId);
+            ushort oldHP = actor.HP;
+            actor.HP = (ushort)Math.Max(0, actor.HP - amount);
+            return (ushort)(oldHP - actor.HP); // 實際減少量
+        }
+        
+        public static ushort AddHP(byte actorId, ushort amount)
+        {
+            ref var actor = ref ActorManager.GetActor(actorId);
+            ushort oldHP = actor.HP;
+            actor.HP = (ushort)Math.Min(actor.MaxHP, actor.HP + amount);
+            return (ushort)(actor.HP - oldHP); // 實際治療量
+        }
+        
+        // 護甲操作
+        public static ushort SetBlock(byte actorId, ushort amount)
+        {
+            ref var actor = ref ActorManager.GetActor(actorId);
+            actor.Block = (ushort)Math.Min(CombatConstants.MAX_BLOCK, amount);
+            return actor.Block;
+        }
+        
+        public static ushort AddBlock(byte actorId, ushort amount)
+        {
+            ref var actor = ref ActorManager.GetActor(actorId);
+            ushort oldBlock = actor.Block;
+            actor.Block = (ushort)Math.Min(CombatConstants.MAX_BLOCK, actor.Block + amount);
+            return (ushort)(actor.Block - oldBlock); // 實際增加量
+        }
+        
+        public static ushort ReduceBlock(byte actorId, ushort amount)
+        {
+            ref var actor = ref ActorManager.GetActor(actorId);
+            ushort oldBlock = actor.Block;
+            actor.Block = (ushort)Math.Max(0, actor.Block - amount);
+            return (ushort)(oldBlock - actor.Block); // 實際減少量
+        }
+        
+        public static void ClearBlock(byte actorId)
+        {
+            ref var actor = ref ActorManager.GetActor(actorId);
+            actor.Block = 0;
+        }
+        
+        // ✅ 新增：Charge 專用操作
+        public static byte AddCharge(byte actorId, byte amount)
+        {
+            ref var actor = ref ActorManager.GetActor(actorId);
+            byte oldCharge = actor.Charge;
+            actor.Charge = (byte)Math.Min(CombatConstants.MAX_CHARGE, actor.Charge + amount);
+            return (byte)(actor.Charge - oldCharge); // 實際增加量
+        }
+        
+        public static byte ConsumeCharge(byte actorId, byte amount = 255) // 255 = 消耗全部
+        {
+            ref var actor = ref ActorManager.GetActor(actorId);
+            byte oldCharge = actor.Charge;
+            
+            if (amount == 255) // 消耗全部
+            {
+                actor.Charge = 0;
+                return oldCharge; // 返回消耗的量
+            }
+            else // 消耗指定量
+            {
+                byte consumeAmount = (byte)Math.Min(actor.Charge, amount);
+                actor.Charge -= consumeAmount;
+                return consumeAmount; // 返回實際消耗量
+            }
+        }
+        
+        public static byte GetCharge(byte actorId)
+        {
+            ref var actor = ref ActorManager.GetActor(actorId);
+            return actor.Charge;
+        }
+        
+        public static void ClearCharge(byte actorId)
+        {
+            ref var actor = ref ActorManager.GetActor(actorId);
+            actor.Charge = 0;
+        }
+        
+        // ==================== 組合操作（基於基礎API構建）====================
+        
         // 造成傷害 - 考慮護甲減免
         public static ushort DealDamage(byte targetId, ushort damage)
         {
-            ref var target = ref ActorManager.GetActor(targetId);
-            if (!target.IsAlive) return 0;
+            if (!ActorManager.IsAlive(targetId)) return 0;
             
             ushort actualDamage = damage;
             
             // 護甲減免
+            ref var target = ref ActorManager.GetActor(targetId);
             if (target.Block > 0)
             {
                 if (target.Block >= damage)
                 {
-                    target.Block -= damage;
+                    ReduceBlock(targetId, damage);
                     return 0; // 完全格擋
                 }
                 else
                 {
                     actualDamage = (ushort)(damage - target.Block);
-                    target.Block = 0;
+                    ClearBlock(targetId); // 護甲完全消耗
                 }
             }
             
             // 扣除生命值
-            target.HP = (ushort)Math.Max(0, target.HP - actualDamage);
-            return actualDamage;
+            return ReduceHP(targetId, actualDamage);
         }
         
         // 治療
         public static ushort Heal(byte targetId, ushort amount)
         {
-            ref var target = ref ActorManager.GetActor(targetId);
-            if (!target.IsAlive) return 0;
-            
-            ushort oldHP = target.HP;
-            target.HP = (ushort)Math.Min(target.MaxHP, target.HP + amount);
-            return (ushort)(target.HP - oldHP);
+            if (!ActorManager.IsAlive(targetId)) return 0;
+            return AddHP(targetId, amount);
         }
         
-        // 增加護甲
-        public static void AddBlock(byte targetId, ushort amount)
-        {
-            ref var target = ref ActorManager.GetActor(targetId);
-            if (!target.IsAlive) return;
-            
-            target.Block = (ushort)Math.Min(CombatConstants.MAX_BLOCK, target.Block + amount);
-        }
-        
-        // 增加蓄力
-        public static void AddCharge(byte targetId, byte amount)
-        {
-            ref var target = ref ActorManager.GetActor(targetId);
-            if (!target.IsAlive) return;
-            
-            target.Charge = (byte)Math.Min(CombatConstants.MAX_CHARGE, target.Charge + amount);
-        }
-        
-        // 添加狀態效果
+        // 狀態操作（保持原有邏輯）
         public static void AddStatus(byte targetId, StatusFlags status, byte duration)
         {
             ref var target = ref ActorManager.GetActor(targetId);
@@ -255,7 +330,6 @@ namespace CombatCore
             
             target.StatusDurations ??= new Dictionary<StatusFlags, byte>();
             
-            // 如果已有該狀態，取較長的持續時間
             if (target.StatusDurations.ContainsKey(status))
             {
                 target.StatusDurations[status] = Math.Max(target.StatusDurations[status], duration);
@@ -266,7 +340,6 @@ namespace CombatCore
             }
         }
         
-        // 移除狀態效果
         public static bool RemoveStatus(byte targetId, StatusFlags status)
         {
             ref var target = ref ActorManager.GetActor(targetId);

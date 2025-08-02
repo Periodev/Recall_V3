@@ -111,26 +111,31 @@ namespace CombatCore
         public static int ExecuteAll()
         {
             int executedCount = 0;
-            
-            // 執行主命令佇列
-            while (s_commands.TryDequeue(out var cmd))
+
+            // 反覆執行，直到所有命令佇列都為空
+            while (s_commands.Count > 0 || s_delayedCommands.Count > 0)
             {
-                var result = ExecuteCmd(in cmd);
-                executedCount++;
-                
-                // 處理命令執行失敗的情況
-                if (!result.Success)
+                // 執行主命令佇列
+                while (s_commands.TryDequeue(out var cmd))
                 {
-                    Console.WriteLine($"命令執行失敗: {result.Message}");
+                    var result = ExecuteCmd(in cmd);
+                    executedCount++;
+
+                    // 處理命令執行失敗的情況
+                    if (!result.Success)
+                    {
+                        Console.WriteLine($"命令執行失敗: {result.Message}");
+                    }
+                }
+
+                // 將延遲命令移至主佇列，下一輪繼續執行
+                while (s_delayedCommands.TryDequeue(out var delayedCmd))
+                {
+                    s_commands.Enqueue(delayedCmd);
                 }
             }
-            
-            // 處理延遲命令
-            while (s_delayedCommands.TryDequeue(out var delayedCmd))
-            {
-                s_commands.Enqueue(delayedCmd);
-            }
-            
+
+            Console.WriteLine($"總共執行 {executedCount} 個命令（包含延遲命令）");
             return executedCount;
         }
         

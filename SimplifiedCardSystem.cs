@@ -379,8 +379,16 @@ namespace CombatCore
         
         // 獲取牌組資訊
         public static DeckConfig GetCurrentConfig() => s_currentConfig;
-        public static int GetHandSize() => s_hand.Count;
-        public static int GetDeckSize() => s_deck.Count;
+        public static int GetHandSize()
+        {
+            EnsureInitialized();
+            return s_hand.Count;
+        }
+        public static int GetDeckSize()
+        {
+            EnsureInitialized();
+            return s_deck.Count;
+        }
         public static CardUsageStats GetStats() => s_stats;
         
         // ✅ 增強：獲取手牌構成統計

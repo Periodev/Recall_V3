@@ -269,7 +269,9 @@ namespace CombatCore
                 return new CommandResult(false, 0, "反彈參與者已死亡");
             
             ushort deflectedDamage = ActorOperations.DealDamage(cmd.SrcId, cmd.Value);
-            
+
+            SimpleEventSystem.OnActorDamaged(cmd.SrcId, cmd.TargetId, deflectedDamage);
+
             if (!ActorManager.IsAlive(cmd.SrcId))
             {
                 PushDelayedCmd(new AtomicCmd(CmdOp.ACTOR_DEATH, 0, cmd.SrcId, 0));

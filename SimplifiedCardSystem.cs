@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 
 namespace CombatCore
 {
@@ -320,7 +321,7 @@ namespace CombatCore
         public static ReadOnlySpan<SimpleCard> GetHand()
         {
             EnsureInitialized();
-            return s_hand.ToArray().AsSpan();
+            return CollectionsMarshal.AsSpan(s_hand);
         }
         
         // ✅ 增強：獲取可用卡牌資訊

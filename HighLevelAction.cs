@@ -227,9 +227,6 @@ namespace CombatCore
                 CommandSystem.PushCmd(buffer[i]);
             }
             
-            // 立即執行（保持原有行為）
-            CommandSystem.ExecuteAll();
-            
             // ✅ 觸發事件：HLA執行完成
             SimpleEventSystem.OnCardPlayed(actorId, HLATranslator.GetActionType(hla));
             

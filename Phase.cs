@@ -67,7 +67,7 @@ namespace CombatCore
         {
             if (s_context.CurrentPhase != PhaseId.PLAYER_PHASE || !s_context.WaitingForInput)
             {
-                Console.WriteLine($"當前不能使用卡牌：Phase={s_context.CurrentPhase}, WaitingInput={s_context.WaitingForInput}");
+                Console.WriteLine($"當前不能使用卡牌：Phase={s_context.CurrentPhase}, WaitingForInput={s_context.WaitingForInput}");
                 return false;
             }
             

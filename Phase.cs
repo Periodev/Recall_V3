@@ -490,40 +490,43 @@ namespace CombatCore
             {
                 if (hand[i].Action == BasicAction.ATTACK && target != 0)
                 {
-                    if (SimpleDeckManager.UseCard(i, target))
+                    if (!PhaseSystem.PlayCard(i, target))
                     {
-                        Console.WriteLine($"🤖 AI使用攻擊卡攻擊敵人{target}");
-                        PhaseSystem.SetWaitingForInput(false); // 通過PhaseSystem設置狀態
-                        return;
+                        return; // 卡牌使用失敗，提前退出
                     }
+
+                    Console.WriteLine($"🤖 AI使用攻擊卡攻擊敵人{target}");
+                    return;
                 }
             }
-            
+
             // 2. 尋找蓄力卡
             for (int i = 0; i < hand.Length; i++)
             {
                 if (hand[i].Action == BasicAction.CHARGE)
                 {
-                    if (SimpleDeckManager.UseCard(i, 0))
+                    if (!PhaseSystem.PlayCard(i, 0))
                     {
-                        Console.WriteLine("🤖 AI使用蓄力卡");
-                        PhaseSystem.SetWaitingForInput(false); // 通過PhaseSystem設置狀態
-                        return;
+                        return; // 卡牌使用失敗，提前退出
                     }
+
+                    Console.WriteLine("🤖 AI使用蓄力卡");
+                    return;
                 }
             }
-            
+
             // 3. 尋找格擋卡
             for (int i = 0; i < hand.Length; i++)
             {
                 if (hand[i].Action == BasicAction.BLOCK)
                 {
-                    if (SimpleDeckManager.UseCard(i, 0))
+                    if (!PhaseSystem.PlayCard(i, 0))
                     {
-                        Console.WriteLine("🤖 AI使用格擋卡");
-                        PhaseSystem.SetWaitingForInput(false); // 通過PhaseSystem設置狀態
-                        return;
+                        return; // 卡牌使用失敗，提前退出
                     }
+
+                    Console.WriteLine("🤖 AI使用格擋卡");
+                    return;
                 }
             }
             

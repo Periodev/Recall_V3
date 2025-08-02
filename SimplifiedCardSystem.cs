@@ -226,33 +226,44 @@ namespace CombatCore
             Console.WriteLine("🎯 戰鬥開始，卡牌系統就緒");
         }
         
-        // 洗牌並抽光所有卡牌（每回合重洗）
-        public static void ShuffleAndDrawAll()
+        public static bool ShuffleAndDrawAll()
         {
             EnsureInitialized();
-            s_hand.Clear();
             
+            // ✅ 提前檢查前置條件
             if (s_deck.Count == 0)
             {
                 Console.WriteLine("❌ 牌組為空，無法洗牌");
-                return;
+                return false;
             }
             
-            // 複製牌組
+            var playerId = GetPlayerId();
+            if (playerId == CombatConstants.INVALID_ACTOR_ID)
+            {
+                Console.WriteLine("❌ 找不到玩家角色，無法進行洗牌");
+                return false; // 直接失敗，而非靜默跳過
+            }
+
+            // 執行洗牌
+            s_hand.Clear();
             var tempDeck = new List<SimpleCard>(s_deck);
-            
+
             // 洗牌（Fisher-Yates算法）
             for (int i = tempDeck.Count - 1; i > 0; i--)
             {
                 int j = s_random.Next(i + 1);
                 (tempDeck[i], tempDeck[j]) = (tempDeck[j], tempDeck[i]);
             }
-            
-            // 全部抽到手牌
+
             s_hand.AddRange(tempDeck);
             s_stats.RecordShuffle();
-            
+
             Console.WriteLine($"🔄 洗牌完成，抽到{s_hand.Count}張卡牌");
+
+            // ✅ 由於前面已經驗證過 playerId，這裡一定有效
+            SimpleEventSystem.OnHandShuffled(playerId, s_hand.Count);
+            
+            return true;
         }
         
         // ✅ 增強：使用卡牌（添加詳細日誌和錯誤處理）
@@ -284,7 +295,7 @@ namespace CombatCore
             
             // 獲取玩家ID
             var playerId = GetPlayerId();
-            if (playerId == 255)
+            if (playerId == CombatConstants.INVALID_ACTOR_ID)
             {
                 Console.WriteLine("❌ 找不到玩家角色");
                 return false;
@@ -306,8 +317,14 @@ namespace CombatCore
                 // 從手牌移除
                 s_hand.RemoveAt(handIndex);
                 s_stats.RecordCardUse(card.Action);
-                
+
                 Console.WriteLine($"✅ 卡牌使用成功，剩餘手牌：{s_hand.Count}張");
+
+                // 觸發事件：手牌已用盡
+                if (s_hand.Count == 0)
+                {
+                    SimpleEventSystem.OnHandEmpty(playerId);
+                }
             }
             else
             {
@@ -415,7 +432,7 @@ namespace CombatCore
         {
             Span<byte> playerBuffer = stackalloc byte[16];
             int playerCount = ActorManager.GetActorsByType(ActorType.PLAYER, playerBuffer);
-            return playerCount > 0 ? playerBuffer[0] : (byte)255;
+            return playerCount > 0 ? playerBuffer[0] : CombatConstants.INVALID_ACTOR_ID;
         }
         
         // ✅ 增強：獲取敵人數量（用於檢查攻擊卡可用性）

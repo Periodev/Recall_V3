@@ -494,7 +494,7 @@ namespace CombatCore
             if (s_healingEnabled)
             {
                 var playerId = GetPlayerId();
-                if (playerId != 255)
+                if (playerId != CombatConstants.INVALID_ACTOR_ID)
                 {
                     var healCmd = CommandBuilder.MakeHealCmd(playerId, playerId, (ushort)s_healingAmount);
                     CommandSystem.PushCmd(healCmd);
@@ -601,7 +601,7 @@ namespace CombatCore
         {
             Span<byte> playerBuffer = stackalloc byte[16];
             int playerCount = ActorManager.GetActorsByType(ActorType.PLAYER, playerBuffer);
-            return playerCount > 0 ? playerBuffer[0] : (byte)255;
+            return playerCount > 0 ? playerBuffer[0] : CombatConstants.INVALID_ACTOR_ID;
         }
         
         private static bool IsPlayer(byte actorId)

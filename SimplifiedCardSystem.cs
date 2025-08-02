@@ -231,28 +231,41 @@ namespace CombatCore
         {
             EnsureInitialized();
             s_hand.Clear();
-            
+
+            // 取得玩家ID（用於事件系統）
+            var playerId = GetPlayerId();
+            if (playerId == 255)
+            {
+                Console.WriteLine("❌ 找不到玩家角色");
+            }
+
             if (s_deck.Count == 0)
             {
                 Console.WriteLine("❌ 牌組為空，無法洗牌");
                 return;
             }
-            
+
             // 複製牌組
             var tempDeck = new List<SimpleCard>(s_deck);
-            
+
             // 洗牌（Fisher-Yates算法）
             for (int i = tempDeck.Count - 1; i > 0; i--)
             {
                 int j = s_random.Next(i + 1);
                 (tempDeck[i], tempDeck[j]) = (tempDeck[j], tempDeck[i]);
             }
-            
+
             // 全部抽到手牌
             s_hand.AddRange(tempDeck);
             s_stats.RecordShuffle();
-            
+
             Console.WriteLine($"🔄 洗牌完成，抽到{s_hand.Count}張卡牌");
+
+            // 觸發事件：手牌已重洗
+            if (playerId != 255)
+            {
+                SimpleEventSystem.OnHandShuffled(playerId, s_hand.Count);
+            }
         }
         
         // ✅ 增強：使用卡牌（添加詳細日誌和錯誤處理）
@@ -306,8 +319,14 @@ namespace CombatCore
                 // 從手牌移除
                 s_hand.RemoveAt(handIndex);
                 s_stats.RecordCardUse(card.Action);
-                
+
                 Console.WriteLine($"✅ 卡牌使用成功，剩餘手牌：{s_hand.Count}張");
+
+                // 觸發事件：手牌已用盡
+                if (s_hand.Count == 0)
+                {
+                    SimpleEventSystem.OnHandEmpty(playerId);
+                }
             }
             else
             {

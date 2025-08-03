@@ -287,49 +287,10 @@ namespace CombatCore
         
         private static CommandResult HandleTurnEndCleanup(in AtomicCmd cmd)
         {
-            // ✅ 使用 Actor API 進行回合結束清理
-            Span<byte> actorBuffer = stackalloc byte[CombatConstants.MAX_ACTORS];
-            int actorCount = ActorManager.GetAliveActors(actorBuffer);
-            
-            for (int i = 0; i < actorCount; i++)
-            {
-                byte actorId = actorBuffer[i];
-                
-                // 護甲歸零
-                ActorOperations.ClearBlock(actorId);
-                
-                // 狀態持續時間減少（保持原有邏輯，因為涉及字典操作）
-                ref var actor = ref ActorManager.GetActor(actorId);
-                if (actor.StatusDurations != null && actor.StatusDurations.Count > 0)
-                {
-                    var statusesToRemove = new List<StatusFlags>();
-                    var statusesToUpdate = new List<(StatusFlags status, byte duration)>();
-                    
-                    foreach (var kvp in actor.StatusDurations)
-                    {
-                        byte newDuration = (byte)(kvp.Value - 1);
-                        if (newDuration <= 0)
-                        {
-                            statusesToRemove.Add(kvp.Key);
-                        }
-                        else
-                        {
-                            statusesToUpdate.Add((kvp.Key, newDuration));
-                        }
-                    }
-                    
-                    foreach (var status in statusesToRemove)
-                    {
-                        ActorOperations.RemoveStatus(actorId, status);
-                    }
-                    
-                    foreach (var (status, duration) in statusesToUpdate)
-                    {
-                        ActorOperations.AddStatus(actorId, status, duration);
-                    }
-                }
-            }
-            
+            // 統一由 ActorManager 處理所有回合結束相關清理邏輯
+            ActorManager.EndTurnCleanup();
+
+            // 觸發回合結束事件
             SimpleEventSystem.OnTurnEnd();
             return new CommandResult(true, 0, "回合結束清理完成");
         }

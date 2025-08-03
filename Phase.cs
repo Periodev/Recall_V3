@@ -312,16 +312,13 @@ namespace CombatCore
         
         private static PhaseResult Cleanup_Process()
         {
-            // ✅ 觸發回合結束事件
-            SimpleEventSystem.OnTurnEnd();
-            
-            // 推入回合結束清理命令
+            // 推入回合結束清理命令，由命令系統統一處理事件與狀態
             CommandSystem.PushCmd(AtomicCmd.TurnEndCleanup());
             CommandSystem.ExecuteAll();
-            
+
             // ✅ 新增：卡牌系統回合結束處理
             SimpleDeckManager.OnTurnEnd();
-            
+
             s_context.CurrentStep = PhaseStep.END;
             return PhaseResult.NEXT_STEP;
         }

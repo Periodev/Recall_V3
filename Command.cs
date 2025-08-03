@@ -133,7 +133,13 @@ namespace CombatCore
                 {
                     s_commands.Enqueue(delayedCmd);
                 }
+
+                // ✅ 每批命令後處理所有待處理事件
+                SimpleEventSystem.ProcessAllEvents();
             }
+
+            // ✅ 最終確保事件已全部處理
+            SimpleEventSystem.ProcessAllEvents();
 
             Console.WriteLine($"總共執行 {executedCount} 個命令（包含延遲命令）");
             return executedCount;

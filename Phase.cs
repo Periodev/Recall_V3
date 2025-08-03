@@ -409,14 +409,14 @@ namespace CombatCore
             
             // ✅ 初始化卡牌系統
             SimpleDeckManager.SetDeckConfig(DeckConfig.DEFAULT);
-            SimpleDeckManager.StartCombat();
-            
-            // 創建玩家
+
+            // 創建玩家與敵人
             byte playerId = ActorManager.AllocateActor(ActorType.PLAYER, 100);
-            
-            // 創建敵人
             ActorManager.AllocateActor(ActorType.ENEMY_BASIC, 50);
             ActorManager.AllocateActor(ActorType.ENEMY_BASIC, 40);
+
+            // ✅ 角色就緒後才開始戰鬥，確保有玩家存在
+            SimpleDeckManager.StartCombat();
             
             Console.WriteLine("戰鬥初始化完成");
             Console.WriteLine("牌組配置:");

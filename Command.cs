@@ -296,8 +296,6 @@ namespace CombatCore
             // 統一由 ActorManager 處理所有回合結束相關清理邏輯
             ActorManager.EndTurnCleanup();
 
-            // 觸發回合結束事件
-            SimpleEventSystem.OnTurnEnd();
             return new CommandResult(true, 0, "回合結束清理完成");
         }
         
